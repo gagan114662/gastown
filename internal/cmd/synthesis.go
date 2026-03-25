@@ -332,12 +332,16 @@ func runSynthesisClose(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("reading convoy '%s': %w", convoyID, err)
 	}
 	var convoys []struct {
-		Status string `json:"status"`
+		Status      string `json:"status"`
+		Description string `json:"description"`
+		Title       string `json:"title"`
 	}
 	if err := json.Unmarshal(showOut.Bytes(), &convoys); err != nil || len(convoys) == 0 {
 		return fmt.Errorf("parsing convoy '%s': invalid response", convoyID)
 	}
 	status := convoys[0].Status
+	description := convoys[0].Description
+	title := convoys[0].Title
 
 	if err := ensureKnownConvoyStatus(status); err != nil {
 		return fmt.Errorf("convoy '%s' has invalid lifecycle state: %w", convoyID, err)
@@ -364,8 +368,23 @@ func runSynthesisClose(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s Convoy closed: %s\n", style.Bold.Render("✓"), convoyID)
 
-	// TODO: Trigger notification if configured
-	// Parse description for "Notify: <address>" and send mail
+	// Send completion mail if "Notify: <addr>" is present in the convoy description.
+	if notifyAddr := parseNotifyAddr(description); notifyAddr != "" {
+		townRoot, rootErr := workspace.FindFromCwdOrError()
+		if rootErr == nil {
+			subject := fmt.Sprintf("Convoy complete: %s", title)
+			body := fmt.Sprintf("Convoy %s has been closed after synthesis.\n\nTitle: %s", convoyID, title)
+			mailCmd := exec.Command("gt", "mail", "send", notifyAddr, "-s", subject, "-m", body) //nolint:gosec // G204: args constructed from internal state
+			mailCmd.Dir = townRoot
+			mailCmd.Stderr = os.Stderr
+			if mailErr := mailCmd.Run(); mailErr != nil {
+				fmt.Printf("%s Warning: failed to send completion mail to %s: %v\n",
+					style.Warning.Render("⚠"), notifyAddr, mailErr)
+			} else {
+				fmt.Printf("%s Completion mail sent to %s\n", style.Bold.Render("✓"), notifyAddr)
+			}
+		}
+	}
 
 	return nil
 }
@@ -498,6 +517,25 @@ func collectLegOutputs(meta *ConvoyMeta, f *formula.Formula) ([]LegOutput, bool,
 	}
 
 	return outputs, allComplete, nil
+}
+
+// parseNotifyAddr scans a convoy description for a "Notify: <addr>" line and
+// returns the trimmed address. Returns "" when no such line is present.
+// The key match is case-insensitive and the key must appear at the start of the
+// line (after optional whitespace) to avoid false positives like "DoNotify:".
+func parseNotifyAddr(description string) string {
+	for _, line := range strings.Split(description, "\n") {
+		trimmed := strings.TrimSpace(line)
+		colonIdx := strings.Index(trimmed, ":")
+		if colonIdx == -1 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(trimmed[:colonIdx]))
+		if key == "notify" {
+			return strings.TrimSpace(trimmed[colonIdx+1:])
+		}
+	}
+	return ""
 }
 
 // expandOutputPath expands template variables in output paths.

@@ -74,6 +74,59 @@ func TestLegOutput(t *testing.T) {
 	}
 }
 
+func TestParseNotifyAddr(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		want        string
+	}{
+		{
+			name:        "notify on its own line",
+			description: "Formula: code-review\nNotify: mayor/\nReview-Id: pr123",
+			want:        "mayor/",
+		},
+		{
+			name:        "notify at start of description",
+			description: "Notify: alice@example.com\nSome other content",
+			want:        "alice@example.com",
+		},
+		{
+			name:        "no notify present",
+			description: "Formula: code-review\nReview-Id: pr123",
+			want:        "",
+		},
+		{
+			name:        "empty description",
+			description: "",
+			want:        "",
+		},
+		{
+			name:        "notify with extra whitespace",
+			description: "  Notify:   witness/   \nother",
+			want:        "witness/",
+		},
+		{
+			name:        "notify keyword case-insensitive",
+			description: "NOTIFY: mayor/\nother",
+			want:        "mayor/",
+		},
+		{
+			name:        "partial word should not match",
+			description: "DoNotify: bad\nother",
+			want:        "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseNotifyAddr(tt.description)
+			if got != tt.want {
+				t.Errorf("parseNotifyAddr(%q) = %q, want %q", tt.description, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvoyMeta(t *testing.T) {
 	// Test ConvoyMeta struct
 	meta := ConvoyMeta{
