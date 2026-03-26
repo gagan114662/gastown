@@ -2,7 +2,9 @@
 # docker build -t gastown:latest -f Dockerfile .
 FROM docker/sandbox-templates:claude-code
 
-ARG GO_VERSION=1.25.6
+ARG GO_VERSION=1.25.8
+ARG DOLT_VERSION=1.82.4
+ARG BD_VERSION=v0.62.0
 
 USER root
 
@@ -24,11 +26,17 @@ RUN apt-get update && apt-get install -y \
 # Install Go from official tarball (apt golang-go is too old)
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
+ENV GOBIN="/usr/local/bin"
 ENV PATH="/app/gastown:/usr/local/go/bin:/home/agent/go/bin:${PATH}"
 
-# Install beads (bd) and dolt
-RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
-RUN curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash
+# Install beads (bd) and dolt with pinned versions.
+RUN go install github.com/steveyegge/beads/cmd/bd@${BD_VERSION}
+RUN rm -rf /tmp/dolt && \
+    git clone --depth 1 --branch v${DOLT_VERSION} https://github.com/dolthub/dolt /tmp/dolt && \
+    cd /tmp/dolt/go && \
+    go install ./cmd/dolt && \
+    cd / && \
+    rm -rf /tmp/dolt
 
 # Set up directories
 RUN mkdir -p /app /gt && chown agent:agent /app /gt

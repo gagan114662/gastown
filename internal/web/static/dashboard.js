@@ -30,7 +30,7 @@
             evtSource.close();
         }
 
-        evtSource = new EventSource('/api/events');
+        evtSource = new EventSource('/api/events?stream=sse');
 
         evtSource.addEventListener('connected', function() {
             window.sseConnected = true;
