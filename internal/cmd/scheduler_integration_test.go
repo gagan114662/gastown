@@ -326,8 +326,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	}
 
 	// Verify: convoy is resolvable via bd show from hq
-	cmd := exec.Command("bd", "show", fields.Convoy, "--json", "--allow-stale")
-	cmd.Dir = hqPath
+	cmd := newSchedulerBDCommand(hqPath, "show", fields.Convoy, "--json", "--allow-stale")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd show convoy %s failed: %v", fields.Convoy, err)
@@ -349,8 +348,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	// Verify: convoy has a "tracks" dependency pointing to the rig bead.
 	// This is the core cross-rig link: convoy lives in HQ DB, bead in rig DB.
 	depArgs := beads.MaybePrependAllowStale([]string{"dep", "list", fields.Convoy, "--direction=down", "--type=tracks", "--json"})
-	depCmd := exec.Command("bd", depArgs...)
-	depCmd.Dir = hqPath
+	depCmd := newSchedulerBDCommand(hqPath, depArgs...)
 	depOut, err := depCmd.Output()
 	if err != nil {
 		t.Fatalf("bd dep list %s --type=tracks failed: %v", fields.Convoy, err)
@@ -459,8 +457,7 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 
 	// Verify: no convoy created (HQ beads DB should have no convoy issues)
 	listArgs := beads.MaybePrependAllowStale([]string{"list", "--type=convoy", "--json"})
-	cmd := exec.Command("bd", listArgs...)
-	cmd.Dir = hqPath
+	cmd := newSchedulerBDCommand(hqPath, listArgs...)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd list convoys failed: %v", err)
@@ -1140,8 +1137,7 @@ func TestSchedulerInvalidJSONContextCleanup(t *testing.T) {
 	})
 
 	// Corrupt the context bead description with invalid JSON.
-	corruptCmd := exec.Command("bd", "update", ctxID, "--description=not valid json {{{")
-	corruptCmd.Dir = hqPath
+	corruptCmd := newSchedulerBDCommand(hqPath, "update", ctxID, "--description=not valid json {{{")
 	if out, err := corruptCmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd update to corrupt description failed: %v\n%s", err, out)
 	}
