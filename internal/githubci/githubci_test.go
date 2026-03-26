@@ -35,13 +35,11 @@ func (r *scriptedRunner) Run(_ context.Context, name string, args ...string) ([]
 }
 
 func TestEnsureBranchCIDispatchesFallback(t *testing.T) {
+	// PushWait: 0 ensures the push-wait loop runs exactly once (deadline already
+	// expired on entry), so the test is deterministic regardless of machine speed.
 	runner := &scriptedRunner{
 		t: t,
 		steps: []scriptStep{
-			{
-				match: "gh run list --repo owner/repo --workflow CI --branch feature",
-				out:   "[]",
-			},
 			{
 				match: "gh run list --repo owner/repo --workflow CI --branch feature",
 				out:   "[]",
@@ -67,7 +65,7 @@ func TestEnsureBranchCIDispatchesFallback(t *testing.T) {
 		Workflow:     "CI",
 		Branch:       "feature",
 		SHA:          "abc123",
-		PushWait:     time.Millisecond,
+		PushWait:     time.Nanosecond, // deadline expires after first FindRun on any machine
 		PollInterval: time.Millisecond,
 		Timeout:      time.Second,
 	})
