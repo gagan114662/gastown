@@ -498,7 +498,9 @@ func (e *Engineer) tryAutoRebase(branch, target string) ([]string, error) {
 		return nil, fmt.Errorf("checkout %s: %w", branch, err)
 	}
 	if err := e.git.Rebase("origin/" + target); err != nil {
-		_ = e.git.AbortRebase()
+		if abortErr := e.git.AbortRebase(); abortErr != nil {
+			_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: rebase abort failed: %v\n", abortErr)
+		}
 		return nil, fmt.Errorf("rebase onto origin/%s: %w", target, err)
 	}
 	if err := e.git.Push("origin", branch, true); err != nil {
