@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -953,6 +954,50 @@ func TestAPIHandler_StateAndAgentEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(agentW.Body.String(), `"agent_id":"hq-mayor"`) {
 		t.Fatalf("GET /api/agents/hq-mayor body = %s, want hq-mayor", agentW.Body.String())
+	}
+}
+
+func TestAPIHandler_StateEndpoint_WithoutTmux(t *testing.T) {
+	townRoot := makeTestWorkspace(t)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler.workDir = townRoot
+	shimDir := t.TempDir()
+	shimPath := filepath.Join(shimDir, "tmux")
+	shimBody := "#!/bin/sh\necho 'tmux: command not found' >&2\nexit 127\n"
+	if runtime.GOOS == "windows" {
+		shimPath = filepath.Join(shimDir, "tmux.bat")
+		shimBody = "@echo off\r\necho tmux: command not found 1>&2\r\nexit /b 127\r\n"
+	}
+	if err := os.WriteFile(shimPath, []byte(shimBody), 0755); err != nil {
+		t.Fatalf("WriteFile tmux shim: %v", err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		t.Fatalf("Open controlplane: %v", err)
+	}
+	if err := store.UpsertAgentRuntime(controlplane.AgentRuntimeRecord{
+		AgentID:         "hq-mayor",
+		Role:            "mayor",
+		Session:         "hq-mayor",
+		Status:          "running",
+		StatusReason:    "session started",
+		SourceAgreement: "legacy-shadow",
+		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertAgentRuntime: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/state without tmux status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status":"unavailable"`) {
+		t.Fatalf("GET /api/state without tmux body = %s, want unavailable tmux projection", w.Body.String())
 	}
 }
 

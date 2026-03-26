@@ -7,7 +7,7 @@
     <title>Gas Town Control Center</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
-    <link rel="stylesheet" href="/static/dashboard.css?v=2">
+    <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
     <div class="dashboard" id="dashboard-main" hx-get="/" hx-trigger="sse:dashboard-update, every 30s [!window.pauseRefresh && !window.sseConnected]" hx-swap="morph:outerHTML" hx-ext="morph">

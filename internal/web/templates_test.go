@@ -140,6 +140,23 @@ func TestConvoyTemplate_HtmxAutoRefresh(t *testing.T) {
 	}
 }
 
+func TestConvoyTemplate_LinksExternalDashboardCSS(t *testing.T) {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() error = %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "convoy.html", ConvoyData{}); err != nil {
+		t.Fatalf("ExecuteTemplate() error = %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, `href="/static/dashboard.css"`) {
+		t.Fatalf("Template should link external dashboard.css, got: %s", output)
+	}
+}
+
 func TestConvoyTemplate_ProgressDisplay(t *testing.T) {
 	tmpl, err := LoadTemplates()
 	if err != nil {

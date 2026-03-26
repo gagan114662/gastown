@@ -1,8 +1,10 @@
 package operatorview
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,8 +62,19 @@ func LoadTownSnapshot(townRoot string) (*TownSnapshot, error) {
 
 	t := tmux.NewTmux()
 	tmuxSessions, err := t.ListSessions()
+	tmuxProjectionStatus := "missing"
+	tmuxProjectionDetail := "no live sessions"
 	if err != nil {
-		return nil, err
+		if isTmuxUnavailable(err) {
+			tmuxSessions = nil
+			tmuxProjectionStatus = "unavailable"
+			tmuxProjectionDetail = "tmux not installed"
+		} else {
+			return nil, err
+		}
+	} else if len(tmuxSessions) > 0 {
+		tmuxProjectionStatus = "ok"
+		tmuxProjectionDetail = "sessions discovered"
 	}
 
 	sessionSet := make(map[string]struct{}, len(tmuxSessions))
@@ -157,7 +170,7 @@ func LoadTownSnapshot(townRoot string) (*TownSnapshot, error) {
 		Conflicts:       townConflicts,
 		Projections: []ProjectionStatus{
 			{Name: "controlplane", Status: "ok", Detail: controlplane.DBPath(townRoot)},
-			{Name: "tmux", Status: projectionStatus(len(tmuxSessions) > 0, "sessions discovered", "no live sessions")},
+			{Name: "tmux", Status: tmuxProjectionStatus, Detail: tmuxProjectionDetail},
 			{Name: "events", Status: projectionStatus(len(recentEvents) > 0, "recent events available", "no recent events")},
 			{Name: "incidents", Status: projectionStatus(len(incidents) > 0, "incident candidates present", "no incident candidates")},
 			{Name: "leases", Status: projectionStatus(len(leases) > 0, "leases present", "no leases recorded")},
@@ -190,6 +203,20 @@ func LoadAgentSnapshot(townRoot, agentID string) (*AgentSnapshot, error) {
 		}
 	}
 	return nil, nil
+}
+
+func isTmuxUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "executable file not found") ||
+		strings.Contains(msg, "command not found") ||
+		strings.Contains(msg, "file does not exist") ||
+		strings.Contains(msg, "not recognized as an internal or external command")
 }
 
 func buildAgentSnapshot(
