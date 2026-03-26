@@ -29,8 +29,8 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 	if cfg.MaxConcurrent != 1 {
 		t.Errorf("expected MaxConcurrent to be 1, got %d", cfg.MaxConcurrent)
 	}
-	if cfg.OnConflict != "assign_back" {
-		t.Errorf("expected OnConflict to be 'assign_back', got %q", cfg.OnConflict)
+	if cfg.OnConflict != "auto_rebase" {
+		t.Errorf("expected OnConflict to be 'auto_rebase', got %q", cfg.OnConflict)
 	}
 	if cfg.StaleClaimTimeout != DefaultStaleClaimTimeout {
 		t.Errorf("expected StaleClaimTimeout to be %v, got %v", DefaultStaleClaimTimeout, cfg.StaleClaimTimeout)
@@ -123,8 +123,8 @@ func TestEngineer_LoadConfig_WithMergeQueue(t *testing.T) {
 	}
 
 	// Check that defaults are preserved for unspecified fields
-	if e.config.OnConflict != "assign_back" {
-		t.Errorf("expected OnConflict default 'assign_back', got %q", e.config.OnConflict)
+	if e.config.OnConflict != "auto_rebase" {
+		t.Errorf("expected OnConflict default 'auto_rebase', got %q", e.config.OnConflict)
 	}
 	// auto_push not set in config — default (true) should be preserved
 	if !e.config.AutoPush {

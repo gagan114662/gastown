@@ -161,7 +161,7 @@ type MergeQueueConfig struct {
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
 		Enabled:                 true,
-		OnConflict:              "assign_back",
+		OnConflict:              "auto_rebase",
 		RunTests:                true,
 		TestCommand:             "",
 		DeleteMergedBranches:    true,
@@ -489,6 +489,31 @@ type ProcessResult struct {
 	NoMerge        bool // Source issue has no_merge flag — intentionally blocked, not a failure
 }
 
+// tryAutoRebase rebases branch onto origin/target, force-pushes it, and
+// re-checks for conflicts. Returns the (possibly empty) post-rebase conflict list.
+// On rebase failure it aborts and returns the error so the caller can fall back.
+func (e *Engineer) tryAutoRebase(branch, target string) ([]string, error) {
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Auto-rebase: rebasing %s onto origin/%s\n", branch, target)
+	if err := e.git.Checkout(branch); err != nil {
+		return nil, fmt.Errorf("checkout %s: %w", branch, err)
+	}
+	if err := e.git.Rebase("origin/" + target); err != nil {
+		_ = e.git.AbortRebase()
+		return nil, fmt.Errorf("rebase onto origin/%s: %w", target, err)
+	}
+	if err := e.git.Push("origin", branch, true); err != nil {
+		return nil, fmt.Errorf("force-push after rebase: %w", err)
+	}
+	_, _ = fmt.Fprintf(e.output, "[Engineer] Auto-rebase: force-pushed %s, re-checking conflicts\n", branch)
+	if err := e.git.Checkout(target); err != nil {
+		return nil, fmt.Errorf("re-checkout target %s: %w", target, err)
+	}
+	if err := e.git.Pull("origin", target); err != nil {
+		_, _ = fmt.Fprintf(e.output, "[Engineer] Warning: pull after rebase: %v (continuing)\n", err)
+	}
+	return e.git.CheckConflicts(branch, target)
+}
+
 // doMerge performs the actual git merge operation.
 func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue string, skipGates ...bool) ProcessResult {
 	// GH#2778: Check no_merge flag on source issue before merging. The polecat
@@ -546,10 +571,20 @@ func (e *Engineer) doMerge(ctx context.Context, branch, target, sourceIssue stri
 		}
 	}
 	if len(conflicts) > 0 {
-		return ProcessResult{
-			Success:  false,
-			Conflict: true,
-			Error:    fmt.Sprintf("merge conflicts in: %v", conflicts),
+		if e.config.OnConflict == "auto_rebase" {
+			rebased, rebaseErr := e.tryAutoRebase(branch, target)
+			if rebaseErr != nil {
+				_, _ = fmt.Fprintf(e.output, "[Engineer] Auto-rebase failed: %v — falling back to conflict task\n", rebaseErr)
+			} else {
+				conflicts = rebased
+			}
+		}
+		if len(conflicts) > 0 {
+			return ProcessResult{
+				Success:  false,
+				Conflict: true,
+				Error:    fmt.Sprintf("merge conflicts in: %v", conflicts),
+			}
 		}
 	}
 
