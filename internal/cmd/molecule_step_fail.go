@@ -120,7 +120,7 @@ func runMoleculeStepFail(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 2: Look up the formula from the molecule root
-	rollbackSteps, formulaName, err := loadRollbackSteps(b, moleculeID, workDir, townRoot)
+	rollbackSteps, formulaName, err := loadRollbackSteps(b, moleculeID, townRoot)
 	if err != nil {
 		// Non-fatal: rollback requires a formula with rollback_steps defined
 		fmt.Printf("%s Could not load rollback steps: %v\n", style.Dim.Render("ℹ"), err)
@@ -180,7 +180,7 @@ func runMoleculeStepFail(cmd *cobra.Command, args []string) error {
 // 1. Loading the molecule root bead to get the formula name
 // 2. Finding and parsing the formula file
 // Returns the rollback steps (may be empty) and the formula name.
-func loadRollbackSteps(b *beads.Beads, moleculeID, workDir, townRoot string) ([]formula.RollbackStep, string, error) {
+func loadRollbackSteps(b *beads.Beads, moleculeID, townRoot string) ([]formula.RollbackStep, string, error) {
 	// Load the molecule root bead to find the formula name
 	mol, err := b.Show(moleculeID)
 	if err != nil {
