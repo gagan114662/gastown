@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
 )
 
@@ -858,7 +862,8 @@ func TestParseIssueShowJSON_InvalidInputs(t *testing.T) {
 func TestAPIHandler_SSE_ContentType(t *testing.T) {
 	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?stream=sse", nil)
+	req.Header.Set("Accept", "text/event-stream")
 	// Cancel context quickly so the SSE handler returns instead of blocking
 	ctx, cancel := context.WithTimeout(req.Context(), 100*time.Millisecond)
 	defer cancel()
@@ -875,6 +880,108 @@ func TestAPIHandler_SSE_ContentType(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, "event: connected") {
 		t.Error("SSE response should contain initial 'connected' event")
+	}
+}
+
+func TestAPIHandler_EventsJSON(t *testing.T) {
+	townRoot := makeTestWorkspace(t)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler.workDir = townRoot
+
+	if err := events.LogEventAt(townRoot, events.Event{
+		Type:       events.TypeBoot,
+		Actor:      "gt",
+		Visibility: events.VisibilityBoth,
+		Payload: map[string]interface{}{
+			"rig": "town",
+		},
+	}); err != nil {
+		t.Fatalf("LogEventAt: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/events status = %d, want 200", w.Code)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("GET /api/events Content-Type = %q, want application/json", got)
+	}
+	if !strings.Contains(w.Body.String(), `"kind":"boot"`) {
+		t.Fatalf("GET /api/events body = %s, want boot event", w.Body.String())
+	}
+}
+
+func TestAPIHandler_StateAndAgentEndpoints(t *testing.T) {
+	townRoot := makeTestWorkspace(t)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler.workDir = townRoot
+
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		t.Fatalf("Open controlplane: %v", err)
+	}
+	if err := store.UpsertAgentRuntime(controlplane.AgentRuntimeRecord{
+		AgentID:         "hq-mayor",
+		Role:            "mayor",
+		Session:         "hq-mayor",
+		Status:          "running",
+		StatusReason:    "session started",
+		SourceAgreement: "legacy-shadow",
+		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertAgentRuntime: %v", err)
+	}
+
+	stateReq := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	stateW := httptest.NewRecorder()
+	handler.ServeHTTP(stateW, stateReq)
+	if stateW.Code != http.StatusOK {
+		t.Fatalf("GET /api/state status = %d, want 200", stateW.Code)
+	}
+	if !strings.Contains(stateW.Body.String(), `"agents"`) || !strings.Contains(stateW.Body.String(), `"hq-mayor"`) {
+		t.Fatalf("GET /api/state body = %s, want agent snapshot", stateW.Body.String())
+	}
+
+	agentReq := httptest.NewRequest(http.MethodGet, "/api/agents/hq-mayor", nil)
+	agentW := httptest.NewRecorder()
+	handler.ServeHTTP(agentW, agentReq)
+	if agentW.Code != http.StatusOK {
+		t.Fatalf("GET /api/agents/hq-mayor status = %d, want 200", agentW.Code)
+	}
+	if !strings.Contains(agentW.Body.String(), `"agent_id":"hq-mayor"`) {
+		t.Fatalf("GET /api/agents/hq-mayor body = %s, want hq-mayor", agentW.Body.String())
+	}
+}
+
+func TestAPIHandler_IncidentsJSON(t *testing.T) {
+	townRoot := makeTestWorkspace(t)
+	handler := NewAPIHandler(30*time.Second, 60*time.Second, "test-token")
+	handler.workDir = townRoot
+
+	if err := events.LogEventAt(townRoot, events.Event{
+		Type:       events.TypeSessionDeath,
+		Kind:       events.TypeSessionDeath,
+		Actor:      "daemon",
+		Session:    "gt-test-agent",
+		Outcome:    "error",
+		Reason:     "zombie cleanup",
+		Visibility: events.VisibilityBoth,
+	}); err != nil {
+		t.Fatalf("LogEventAt: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/incidents", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/incidents status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"incidents"`) || !strings.Contains(w.Body.String(), `"session_death"`) {
+		t.Fatalf("GET /api/incidents body = %s, want session_death incident", w.Body.String())
 	}
 }
 
@@ -931,6 +1038,20 @@ func TestOptionsCacheConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func makeTestWorkspace(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	mayorDir := filepath.Join(root, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mayorDir, "town.json"), []byte(`{"name":"test-town"}`), 0644); err != nil {
+		t.Fatalf("WriteFile town.json: %v", err)
+	}
+	_ = session.InitRegistry(root)
+	return root
 }
 
 func TestParseConvoyListJSON(t *testing.T) {

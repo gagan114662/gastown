@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -157,6 +158,9 @@ func PrepareEvent(event Event) Event {
 		if event.Rig == "" {
 			event.Rig = inferRigFromActor(event.Actor)
 		}
+	}
+	if event.Role == "" {
+		event.Role = inferRoleFromActor(event.Actor)
 	}
 	if event.Session == "" {
 		event.Session = payloadString(event.Payload, "session")
@@ -338,10 +342,6 @@ func inferRigFromActor(actor string) string {
 	if actor == "mayor" || actor == "deacon" || actor == "daemon" || actor == "gt" || actor == "dashboard" {
 		return ""
 	}
-	if slash := filepath.ToSlash(actor); slash != "" {
-		parts := filepath.SplitList("")
-		_ = parts
-	}
 	parts := splitActor(actor)
 	if len(parts) == 0 {
 		return ""
@@ -354,23 +354,29 @@ func inferRigFromActor(actor string) string {
 	}
 }
 
+func inferRoleFromActor(actor string) string {
+	switch actor {
+	case "mayor", "deacon":
+		return actor
+	}
+	parts := splitActor(actor)
+	if len(parts) < 2 {
+		return ""
+	}
+	switch parts[1] {
+	case "witness", "refinery", "crew":
+		return parts[1]
+	case "polecats":
+		return "polecat"
+	default:
+		return "polecat"
+	}
+}
+
 func splitActor(actor string) []string {
-	var parts []string
-	current := ""
-	for _, r := range actor {
-		if r == '/' {
-			if current != "" {
-				parts = append(parts, current)
-				current = ""
-			}
-			continue
-		}
-		current += string(r)
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
+	return strings.FieldsFunc(actor, func(r rune) bool {
+		return r == '/'
+	})
 }
 
 // Payload helpers for common event structures.

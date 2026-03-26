@@ -119,6 +119,23 @@ func TestWritePreservesTimestamp(t *testing.T) {
 	}
 }
 
+func TestWriteAtomicLeavesNoTempFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	cp := &Checkpoint{Notes: "atomic"}
+
+	if err := Write(tmpDir, cp); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(tmpDir, "."+Filename+".tmp-*"))
+	if err != nil {
+		t.Fatalf("Glob: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary checkpoint files left behind: %v", matches)
+	}
+}
+
 func TestReadCorruptedJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := Path(tmpDir)
