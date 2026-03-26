@@ -87,6 +87,18 @@ func beadsInitEnv(beadsDir, homeDir string) []string {
 	return filtered
 }
 
+func configureTownBeadsForConvoys(t *testing.T, townRoot, homeDir string) {
+	t.Helper()
+
+	beadsDir := filepath.Join(townRoot, ".beads")
+	cmd := exec.Command("bd", "config", "set", "allowed_prefixes", "hq,hq-cv")
+	cmd.Dir = townRoot
+	cmd.Env = beadsInitEnv(beadsDir, homeDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("configure allowed_prefixes in %s: %v\n%s", townRoot, err, out)
+	}
+}
+
 // setupSchedulerIntegrationTown creates a minimal town filesystem for scheduler tests.
 // Uses the shared Dolt test server (managed by requireDoltServer)
 // for beads databases. No gt install, no Claude credentials, no agent sessions.
@@ -155,9 +167,12 @@ func setupSchedulerIntegrationTown(t *testing.T) (hqPath, rigPath, gtBinary stri
 	// --- town-level .beads/ ---
 	routes := []beads.Route{
 		{Prefix: hqPrefix + "-", Path: "."},
+		{Prefix: "hq-", Path: "."},
+		{Prefix: "hq-cv-", Path: "."},
 		{Prefix: rigPrefix + "-", Path: "testrig/mayor/rig"},
 	}
 	initBeadsDBForServer(t, hqPath, hqPrefix, tmpDir)
+	configureTownBeadsForConvoys(t, hqPath, tmpDir)
 	if err := beads.WriteRoutes(filepath.Join(hqPath, ".beads"), routes); err != nil {
 		t.Fatalf("write routes: %v", err)
 	}
@@ -589,10 +604,13 @@ func setupMultiRigSchedulerTown(t *testing.T) (hqPath, rig1Path, rig2Path, gtBin
 	// --- town-level .beads/ with routes for all three DBs ---
 	routes := []beads.Route{
 		{Prefix: hqPrefix + "-", Path: "."},
+		{Prefix: "hq-", Path: "."},
+		{Prefix: "hq-cv-", Path: "."},
 		{Prefix: rig1Prefix + "-", Path: "rig1/mayor/rig"},
 		{Prefix: rig2Prefix + "-", Path: "rig2/mayor/rig"},
 	}
 	initBeadsDBForServer(t, hqPath, hqPrefix, tmpDir)
+	configureTownBeadsForConvoys(t, hqPath, tmpDir)
 	if err := beads.WriteRoutes(filepath.Join(hqPath, ".beads"), routes); err != nil {
 		t.Fatalf("write routes: %v", err)
 	}
