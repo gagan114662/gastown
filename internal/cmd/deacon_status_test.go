@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -235,6 +236,9 @@ func TestDeaconStatusJSON_LastActionOmitEmpty(t *testing.T) {
 // updateAgentBeadState must NOT call `bd agent state` (which doesn't exist in bd).
 // It should call `bd update --set-metadata agent_state=...` instead.
 func TestUpdateAgentBeadState_UsesBdUpdateNotBdAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script bd stub not supported on Windows")
+	}
 	// Create a temp bin dir with a bd stub that records its args.
 	binDir := t.TempDir()
 	argsFile := filepath.Join(binDir, "bd_args.txt")

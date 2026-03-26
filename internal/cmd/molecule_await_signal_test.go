@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -305,6 +306,9 @@ func TestBackoffWindowResumption(t *testing.T) {
 // updateAgentHeartbeat must NOT call `bd agent heartbeat` (which doesn't exist in bd).
 // It should call `bd update --set-metadata last_activity=...` instead.
 func TestUpdateAgentHeartbeat_UsesBdUpdateNotBdAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script bd stub not supported on Windows")
+	}
 	// Create a temp bin dir with a bd stub that records its args.
 	binDir := t.TempDir()
 	argsFile := filepath.Join(binDir, "bd_args.txt")
