@@ -101,3 +101,118 @@ func TestStoreUpsertAgentRuntime(t *testing.T) {
 		t.Fatalf("LastEventKind = %q, want session_start", got.LastEventKind)
 	}
 }
+
+func TestStoreSupervisorState(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not installed")
+	}
+
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	lease, err := store.AcquireLease(LeaseRecord{
+		LeaseID: LeaseKey("refinery", "gastown"),
+		Service: "refinery",
+		Rig:     "gastown",
+		Session: "gt-gastown-refinery",
+		Holder:  "refinery",
+		Status:  "active",
+		Detail:  "tmux",
+	})
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	if lease == nil || lease.Status != "active" {
+		t.Fatalf("lease = %#v, want active lease", lease)
+	}
+
+	if err := store.UpsertRespawnCounter(RespawnCounter{
+		BeadID:      "gt-abc",
+		Rig:         "gastown",
+		Count:       3,
+		MaxCount:    4,
+		LastRespawn: time.Now().UTC().Format(time.RFC3339),
+		Blocked:     false,
+		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertRespawnCounter: %v", err)
+	}
+	respawn, err := store.GetRespawnCounter("gt-abc")
+	if err != nil {
+		t.Fatalf("GetRespawnCounter: %v", err)
+	}
+	if respawn == nil || respawn.Count != 3 {
+		t.Fatalf("respawn = %#v, want count 3", respawn)
+	}
+
+	if err := store.UpsertRedispatchRecord(RedispatchRecord{
+		BeadID:          "gt-abc",
+		SourceRig:       "gastown",
+		TargetRig:       "gastown",
+		AttemptCount:    2,
+		LastAttemptTime: time.Now().UTC().Format(time.RFC3339),
+		LastAction:      "redispatched",
+		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertRedispatchRecord: %v", err)
+	}
+	redispatch, err := store.GetRedispatchRecord("gt-abc")
+	if err != nil {
+		t.Fatalf("GetRedispatchRecord: %v", err)
+	}
+	if redispatch == nil || redispatch.AttemptCount != 2 {
+		t.Fatalf("redispatch = %#v, want attempt count 2", redispatch)
+	}
+
+	if err := store.UpsertCleanupState(CleanupState{
+		CleanupID:    CleanupKey("gastown", "alpha"),
+		Rig:          "gastown",
+		PolecatName:  "alpha",
+		BeadID:       "gt-abc",
+		Session:      "gt-gastown-p-alpha",
+		Status:       "cleanup-tracked",
+		Blocker:      "has_uncommitted",
+		AttemptCount: 1,
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertCleanupState: %v", err)
+	}
+	cleanup, err := store.GetCleanupStateByPolecat("gastown", "alpha")
+	if err != nil {
+		t.Fatalf("GetCleanupStateByPolecat: %v", err)
+	}
+	if cleanup == nil || cleanup.Status != "cleanup-tracked" {
+		t.Fatalf("cleanup = %#v, want cleanup-tracked", cleanup)
+	}
+
+	if err := store.RecordDependencyHealth(DependencyHealth{
+		DependencyKey: DependencyKey("dolt", "gastown"),
+		Name:          "dolt",
+		Scope:         "gastown",
+		Status:        "degraded",
+		Detail:        "connection refused",
+		CheckedAt:     time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("RecordDependencyHealth: %v", err)
+	}
+	deps, err := store.ListDependencyHealth()
+	if err != nil {
+		t.Fatalf("ListDependencyHealth: %v", err)
+	}
+	if len(deps) != 1 || deps[0].Status != "degraded" {
+		t.Fatalf("deps = %#v, want one degraded dependency", deps)
+	}
+
+	if err := store.ReleaseLease(LeaseKey("refinery", "gastown"), "stopped"); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+	released, err := store.GetLease(LeaseKey("refinery", "gastown"))
+	if err != nil {
+		t.Fatalf("GetLease after release: %v", err)
+	}
+	if released == nil || released.Status != "released" {
+		t.Fatalf("released lease = %#v, want released", released)
+	}
+}

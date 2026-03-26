@@ -81,6 +81,124 @@
     connectSSE();
 
     // ============================================
+    // OPERATOR STATE PANEL
+    // ============================================
+    function loadOperatorState() {
+        var summary = document.getElementById('operator-summary');
+        if (!summary) return;
+
+        fetch('/api/state', { headers: { 'Accept': 'application/json' } })
+            .then(function(resp) {
+                if (!resp.ok) throw new Error('operator state unavailable');
+                return resp.json();
+            })
+            .then(function(data) {
+                renderOperatorState(data);
+            })
+            .catch(function(err) {
+                summary.textContent = 'Operator state unavailable: ' + err.message;
+            });
+    }
+
+    function renderOperatorState(data) {
+        var summary = document.getElementById('operator-summary');
+        var depsEl = document.getElementById('operator-dependencies');
+        var leasesEl = document.getElementById('operator-leases');
+        var cleanupEl = document.getElementById('operator-cleanup');
+        var loopsEl = document.getElementById('operator-loops');
+        var conflictCount = document.getElementById('operator-conflict-count');
+        if (!summary || !depsEl || !leasesEl || !cleanupEl || !loopsEl || !conflictCount) return;
+
+        var conflicts = Array.isArray(data.conflicts) ? data.conflicts : [];
+        var incidents = Array.isArray(data.incidents) ? data.incidents : [];
+        var leases = Array.isArray(data.leases) ? data.leases : [];
+        var dependencies = Array.isArray(data.dependencies) ? data.dependencies : [];
+        var cleanupStates = Array.isArray(data.cleanup_states) ? data.cleanup_states : [];
+        var respawns = Array.isArray(data.respawns) ? data.respawns : [];
+        var redispatches = Array.isArray(data.redispatches) ? data.redispatches : [];
+
+        conflictCount.textContent = String(conflicts.length);
+        summary.innerHTML =
+            '<div class="operator-pill operator-status-' + escapeHtml(data.status || 'unknown') + '">' + escapeHtml(data.status || 'unknown') + '</div>' +
+            '<div class="operator-summary-text">' +
+                '<strong>' + escapeHtml(data.status_reason || 'No reason recorded') + '</strong>' +
+                '<span>' + String(incidents.length) + ' incidents, ' + String(conflicts.length) + ' conflicts, ' + String((data.agents || []).length) + ' agents</span>' +
+            '</div>';
+
+        depsEl.innerHTML = renderOperatorItems(
+            dependencies.slice(0, 6).map(function(dep) {
+                return {
+                    title: dep.name + (dep.scope ? ' (' + dep.scope + ')' : ''),
+                    detail: dep.detail || dep.status,
+                    status: dep.status || 'unknown'
+                };
+            }),
+            'No dependency checks yet'
+        );
+
+        leasesEl.innerHTML = renderOperatorItems(
+            leases.filter(function(lease) { return lease.status !== 'released'; }).slice(0, 6).map(function(lease) {
+                return {
+                    title: lease.service + (lease.rig ? ' (' + lease.rig + ')' : ''),
+                    detail: lease.session || lease.detail || lease.holder || 'no holder',
+                    status: lease.status || 'unknown'
+                };
+            }),
+            'No active leases'
+        );
+
+        cleanupEl.innerHTML = renderOperatorItems(
+            cleanupStates.slice(0, 6).map(function(state) {
+                return {
+                    title: (state.rig || 'unknown') + '/' + (state.polecat_name || state.cleanup_id || 'cleanup'),
+                    detail: state.blocker || state.status,
+                    status: state.status || 'unknown'
+                };
+            }),
+            'No cleanup backlog'
+        );
+
+        loopsEl.innerHTML = renderOperatorItems(
+            respawns.filter(function(item) { return item.count > 0; }).slice(0, 3).map(function(item) {
+                return {
+                    title: item.bead_id,
+                    detail: 'respawns ' + String(item.count) + '/' + String(item.max_count || 0),
+                    status: item.blocked ? 'blocked' : 'warning'
+                };
+            }).concat(
+                redispatches.filter(function(item) {
+                    return item.attempt_count > 0 || item.escalated;
+                }).slice(0, 3).map(function(item) {
+                    return {
+                        title: item.bead_id,
+                        detail: 'redispatch ' + String(item.attempt_count) + ' (' + (item.last_action || 'unknown') + ')',
+                        status: item.escalated ? 'blocked' : 'warning'
+                    };
+                })
+            ),
+            'No loop pressure detected'
+        );
+    }
+
+    function renderOperatorItems(items, emptyText) {
+        if (!items || !items.length) {
+            return '<div class="operator-empty">' + escapeHtml(emptyText) + '</div>';
+        }
+        return items.map(function(item) {
+            return '<div class="operator-item">' +
+                '<span class="operator-item-status operator-status-' + escapeHtml(item.status || 'unknown') + '"></span>' +
+                '<div class="operator-item-body">' +
+                    '<div class="operator-item-title">' + escapeHtml(item.title || 'unknown') + '</div>' +
+                    '<div class="operator-item-detail">' + escapeHtml(item.detail || '') + '</div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    loadOperatorState();
+    window.setInterval(loadOperatorState, 15000);
+
+    // ============================================
     // EXPAND BUTTON HANDLER
     // ============================================
     document.addEventListener('click', function(e) {
@@ -150,6 +268,7 @@
         if (window.refreshReadyPanel) window.refreshReadyPanel();
         // Update connection status indicator after morph
         updateConnectionStatus(window.sseConnected ? 'live' : 'reconnecting');
+        loadOperatorState();
     });
 
     // ============================================

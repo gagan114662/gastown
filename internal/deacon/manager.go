@@ -9,6 +9,8 @@ import (
 
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -99,6 +101,22 @@ func (m *Manager) Start(agentOverride string) error {
 		return fmt.Errorf("creating deacon directory: %w", err)
 	}
 
+	leaseID := controlplane.LeaseKey("deacon", "")
+	leaseStore, releaseLeaseOnError, err := acquireDeaconLease(m.townRoot, controlplane.LeaseRecord{
+		LeaseID: leaseID,
+		Service: "deacon",
+		Session: sessionID,
+		Holder:  "Deacon",
+		Status:  "active",
+		Detail:  "tmux",
+	})
+	if err != nil {
+		if errors.Is(err, controlplane.ErrLeaseHeld) {
+			return ErrAlreadyRunning
+		}
+		return err
+	}
+
 	// Ensure runtime settings exist in deaconDir where session runs.
 	runtimeConfig := config.ResolveRoleAgentConfig("deacon", m.townRoot, deaconDir)
 	if err := runtime.EnsureSettingsForRole(deaconDir, deaconDir, "deacon", runtimeConfig); err != nil {
@@ -124,6 +142,9 @@ func (m *Manager) Start(agentOverride string) error {
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, deaconDir, startupCmd); err != nil {
+		if releaseLeaseOnError && leaseStore != nil {
+			_ = leaseStore.ReleaseLease(leaseID, "start failed")
+		}
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
@@ -158,6 +179,9 @@ func (m *Manager) Start(agentOverride string) error {
 	if err := t.WaitForCommand(sessionID, constants.SupportedShells, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
+		if releaseLeaseOnError && leaseStore != nil {
+			_ = leaseStore.ReleaseLease(leaseID, "start failed")
+		}
 		return fmt.Errorf("waiting for deacon to start: %w", err)
 	}
 
@@ -178,6 +202,20 @@ func (m *Manager) Start(agentOverride string) error {
 
 	// Accept startup dialogs (workspace trust + bypass permissions) if they appear.
 	_ = t.AcceptStartupDialogs(sessionID)
+
+	_ = events.LogEventAt(m.townRoot, events.Event{
+		Kind:       events.TypeLeaseAcquired,
+		Type:       events.TypeLeaseAcquired,
+		Actor:      "deacon",
+		Role:       "deacon",
+		Session:    sessionID,
+		Outcome:    "success",
+		Reason:     "deacon manager started",
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"service": "deacon",
+		},
+	})
 
 	time.Sleep(constants.ShutdownNotifyDelay)
 
@@ -208,6 +246,22 @@ func (m *Manager) Stop() error {
 	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
+	if store, err := controlplane.Open(m.townRoot); err == nil {
+		_ = store.ReleaseLease(controlplane.LeaseKey("deacon", ""), "session stopped")
+	}
+	_ = events.LogEventAt(m.townRoot, events.Event{
+		Kind:       events.TypeLeaseReleased,
+		Type:       events.TypeLeaseReleased,
+		Actor:      "deacon",
+		Role:       "deacon",
+		Session:    sessionID,
+		Outcome:    "success",
+		Reason:     "deacon manager stopped",
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"service": "deacon",
+		},
+	})
 
 	return nil
 }
@@ -231,4 +285,15 @@ func (m *Manager) Status() (*tmux.SessionInfo, error) {
 	}
 
 	return t.GetSessionInfo(sessionID)
+}
+
+func acquireDeaconLease(townRoot string, record controlplane.LeaseRecord) (*controlplane.Store, bool, error) {
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		return nil, false, nil
+	}
+	if _, err := store.AcquireLease(record); err != nil {
+		return store, false, fmt.Errorf("acquiring deacon lease: %w", err)
+	}
+	return store, true, nil
 }

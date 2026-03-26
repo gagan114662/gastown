@@ -99,6 +99,13 @@ const (
 
 	// Operator events
 	TypeDashboardCommand = "dashboard_command"
+	TypeLeaseAcquired    = "lease_acquired"
+	TypeLeaseReleased    = "lease_released"
+	TypeRespawnRecorded  = "respawn_recorded"
+	TypeRespawnBlocked   = "respawn_blocked"
+	TypeRedispatch       = "redispatch_decision"
+	TypeCleanupState     = "cleanup_transition"
+	TypeDependencyHealth = "dependency_health"
 )
 
 // EventsFile is the name of the raw events log.

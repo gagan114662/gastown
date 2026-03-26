@@ -5,6 +5,21 @@ import "github.com/steveyegge/gastown/internal/controlplane"
 // Incident is the operator-facing incident type derived from canonical events.
 type Incident = controlplane.Incident
 
+// LeaseRecord is the operator-facing singleton lease type.
+type LeaseRecord = controlplane.LeaseRecord
+
+// RespawnCounter is the operator-facing witness respawn counter.
+type RespawnCounter = controlplane.RespawnCounter
+
+// RedispatchRecord is the operator-facing deacon redispatch state.
+type RedispatchRecord = controlplane.RedispatchRecord
+
+// CleanupState is the operator-facing cleanup state projection.
+type CleanupState = controlplane.CleanupState
+
+// DependencyHealth is the operator-facing dependency health projection.
+type DependencyHealth = controlplane.DependencyHealth
+
 // ProjectionStatus reports the health of a single evidence source or projection.
 type ProjectionStatus struct {
 	Name      string `json:"name"`
@@ -91,6 +106,10 @@ type AgentSnapshot struct {
 	Conflicts       []string                         `json:"conflicts,omitempty"`
 	Projections     []ProjectionStatus               `json:"projections,omitempty"`
 	Runtime         *controlplane.AgentRuntimeRecord `json:"runtime,omitempty"`
+	Lease           *LeaseRecord                     `json:"lease,omitempty"`
+	Respawn         *RespawnCounter                  `json:"respawn,omitempty"`
+	Redispatch      *RedispatchRecord                `json:"redispatch,omitempty"`
+	Cleanup         *CleanupState                    `json:"cleanup,omitempty"`
 	Tmux            TmuxProjection                   `json:"tmux"`
 	Heartbeat       HeartbeatProjection              `json:"heartbeat"`
 	Checkpoint      CheckpointProjection             `json:"checkpoint"`
@@ -109,6 +128,11 @@ type TownSnapshot struct {
 	SourceAgreement string                   `json:"source_agreement,omitempty"`
 	Conflicts       []string                 `json:"conflicts,omitempty"`
 	Projections     []ProjectionStatus       `json:"projections,omitempty"`
+	Leases          []LeaseRecord            `json:"leases,omitempty"`
+	Respawns        []RespawnCounter         `json:"respawns,omitempty"`
+	Redispatches    []RedispatchRecord       `json:"redispatches,omitempty"`
+	CleanupStates   []CleanupState           `json:"cleanup_states,omitempty"`
+	Dependencies    []DependencyHealth       `json:"dependencies,omitempty"`
 	Agents          []AgentSnapshot          `json:"agents"`
 	RecentEvents    []controlplane.TownEvent `json:"recent_events,omitempty"`
 	Incidents       []Incident               `json:"incidents,omitempty"`

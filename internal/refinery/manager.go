@@ -17,6 +17,8 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/rig"
 	"github.com/steveyegge/gastown/internal/runtime"
@@ -182,12 +184,32 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 		return fmt.Errorf("building startup command: %w", err)
 	}
 
+	leaseID := controlplane.LeaseKey("refinery", m.rig.Name)
+	leaseStore, releaseLeaseOnError, err := acquireRefineryLease(townRoot, controlplane.LeaseRecord{
+		LeaseID: leaseID,
+		Service: "refinery",
+		Rig:     m.rig.Name,
+		Session: sessionID,
+		Holder:  "refinery",
+		Status:  "active",
+		Detail:  "tmux",
+	})
+	if err != nil {
+		if errors.Is(err, controlplane.ErrLeaseHeld) {
+			return ErrAlreadyRunning
+		}
+		return err
+	}
+
 	// Generate the GASTA run ID for this refinery session.
 	runID := uuid.New().String()
 
 	// Create session with command directly to avoid send-keys race condition.
 	// See: https://github.com/anthropics/gastown/issues/280
 	if err := t.NewSessionWithCommand(sessionID, refineryRigDir, command); err != nil {
+		if releaseLeaseOnError && leaseStore != nil {
+			_ = leaseStore.ReleaseLease(leaseID, "start failed")
+		}
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
@@ -224,6 +246,9 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	if err := t.WaitForRuntimeReady(sessionID, runtimeConfig, constants.ClaudeStartTimeout); err != nil {
 		// Kill the zombie session before returning error
 		_ = t.KillSessionWithProcesses(sessionID)
+		if releaseLeaseOnError && leaseStore != nil {
+			_ = leaseStore.ReleaseLease(leaseID, "start failed")
+		}
 		return fmt.Errorf("waiting for refinery to start: %w", err)
 	}
 
@@ -240,6 +265,21 @@ func (m *Manager) Start(foreground bool, agentOverride string) error {
 	// Record the agent instantiation event (GASTA root span).
 	session.RecordAgentInstantiateFromDir(context.Background(), runID, runtimeConfig.ResolvedAgent,
 		"refinery", "refinery", sessionID, m.rig.Name, townRoot, "", refineryRigDir)
+	_ = events.LogEventAt(townRoot, events.Event{
+		Kind:       events.TypeLeaseAcquired,
+		Type:       events.TypeLeaseAcquired,
+		Actor:      fmt.Sprintf("%s/refinery", m.rig.Name),
+		Role:       "refinery",
+		Rig:        m.rig.Name,
+		Session:    sessionID,
+		RunID:      runID,
+		Outcome:    "success",
+		Reason:     "refinery manager started",
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"service": "refinery",
+		},
+	})
 
 	return nil
 }
@@ -294,7 +334,27 @@ func (m *Manager) Stop() error {
 	}
 
 	// Kill the tmux session
-	return t.KillSession(sessionID)
+	if err := t.KillSession(sessionID); err != nil {
+		return err
+	}
+	if store, err := controlplane.Open(filepath.Dir(m.rig.Path)); err == nil {
+		_ = store.ReleaseLease(controlplane.LeaseKey("refinery", m.rig.Name), "session stopped")
+	}
+	_ = events.LogEventAt(filepath.Dir(m.rig.Path), events.Event{
+		Kind:       events.TypeLeaseReleased,
+		Type:       events.TypeLeaseReleased,
+		Actor:      fmt.Sprintf("%s/refinery", m.rig.Name),
+		Role:       "refinery",
+		Rig:        m.rig.Name,
+		Session:    sessionID,
+		Outcome:    "success",
+		Reason:     "refinery manager stopped",
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"service": "refinery",
+		},
+	})
+	return nil
 }
 
 // Queue returns the current merge queue.
@@ -362,6 +422,17 @@ func compareScoredIssues(a, b scoredIssue) bool {
 		return a.issue != nil
 	}
 	return a.issue.ID < b.issue.ID
+}
+
+func acquireRefineryLease(townRoot string, record controlplane.LeaseRecord) (*controlplane.Store, bool, error) {
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		return nil, false, nil
+	}
+	if _, err := store.AcquireLease(record); err != nil {
+		return store, false, fmt.Errorf("acquiring refinery lease: %w", err)
+	}
+	return store, true, nil
 }
 
 // calculateIssueScore computes the priority score for an MR issue.
@@ -570,6 +641,7 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	townRoot := filepath.Dir(m.rig.Path)
 
 	result := &PostMergeResult{
 		MR:            mr,
@@ -577,6 +649,10 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 	}
 
 	b := beads.New(m.rig.BeadsPath())
+	polecatName := strings.TrimPrefix(mr.Worker, "polecats/")
+	if polecatName != "" {
+		recordRefineryCleanupState(townRoot, m.rig.Name, polecatName, mr.IssueID, mr.ID, "post-merge-started", "", nil)
+	}
 
 	// Close the MR bead
 	if mr.IsClosed() {
@@ -611,6 +687,9 @@ func (m *Manager) PostMerge(idOrBranch string) (*PostMergeResult, error) {
 			result.SourceIssueClosed = true
 		}
 	}
+	if polecatName != "" {
+		recordRefineryCleanupState(townRoot, m.rig.Name, polecatName, mr.IssueID, mr.ID, "post-merge-closed", "", nil)
+	}
 
 	return result, nil
 }
@@ -631,3 +710,66 @@ func (m *Manager) notifyWorkerRejected(mr *MergeRequest, reason string) {
 
 // Town root is computed in Start() as filepath.Dir(m.rig.Path) and passed
 // through to callers — no filesystem-inference function needed (ZFC gt-qago).
+
+func recordRefineryCleanupState(townRoot, rigName, polecatName, beadID, mrID, status, blocker string, stateErr error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	sessionID := session.PolecatSessionName(session.PrefixFor(rigName), polecatName)
+	if store, err := controlplane.Open(townRoot); err == nil {
+		attemptCount := 1
+		if existing, getErr := store.GetCleanupStateByPolecat(rigName, polecatName); getErr == nil && existing != nil {
+			attemptCount = existing.AttemptCount + 1
+		}
+		_ = store.UpsertCleanupState(controlplane.CleanupState{
+			CleanupID:    controlplane.CleanupKey(rigName, polecatName),
+			Rig:          rigName,
+			PolecatName:  polecatName,
+			BeadID:       beadID,
+			Session:      sessionID,
+			Status:       status,
+			Blocker:      blocker,
+			AttemptCount: attemptCount,
+			LastError:    refineryErrorString(stateErr),
+			UpdatedAt:    now,
+			Payload: map[string]interface{}{
+				"mr_id": mrID,
+			},
+		})
+	}
+	outcome := "success"
+	if stateErr != nil {
+		outcome = "error"
+	}
+	_ = events.LogEventAt(townRoot, events.Event{
+		Kind:       events.TypeCleanupState,
+		Type:       events.TypeCleanupState,
+		Actor:      fmt.Sprintf("%s/refinery", rigName),
+		Role:       "refinery",
+		Rig:        rigName,
+		Session:    sessionID,
+		BeadID:     beadID,
+		MRID:       mrID,
+		Outcome:    outcome,
+		Reason:     firstRefineryNonEmpty(blocker, refineryErrorString(stateErr), status),
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"status": status,
+			"mr_id":  mrID,
+		},
+	})
+}
+
+func refineryErrorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func firstRefineryNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}

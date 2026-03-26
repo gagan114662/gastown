@@ -60,6 +60,71 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+CREATE TABLE IF NOT EXISTS leases (
+  lease_id TEXT PRIMARY KEY,
+  service TEXT NOT NULL,
+  rig TEXT,
+  session TEXT,
+  holder TEXT,
+  status TEXT NOT NULL,
+  acquired_at TEXT NOT NULL,
+  renewed_at TEXT NOT NULL,
+  released_at TEXT,
+  detail TEXT,
+  evidence_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_leases_service ON leases(service, rig);
+CREATE TABLE IF NOT EXISTS respawn_counters (
+  bead_id TEXT PRIMARY KEY,
+  rig TEXT,
+  count INTEGER NOT NULL DEFAULT 0,
+  max_count INTEGER NOT NULL DEFAULT 0,
+  last_respawn TEXT,
+  blocked INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_respawn_rig ON respawn_counters(rig, updated_at DESC);
+CREATE TABLE IF NOT EXISTS redispatch_state (
+  bead_id TEXT PRIMARY KEY,
+  source_rig TEXT,
+  target_rig TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_attempt_time TEXT,
+  cooldown_until TEXT,
+  escalated INTEGER NOT NULL DEFAULT 0,
+  escalated_at TEXT,
+  last_action TEXT,
+  updated_at TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_redispatch_updated ON redispatch_state(updated_at DESC);
+CREATE TABLE IF NOT EXISTS cleanup_state (
+  cleanup_id TEXT PRIMARY KEY,
+  rig TEXT,
+  polecat_name TEXT,
+  bead_id TEXT,
+  session TEXT,
+  status TEXT NOT NULL,
+  blocker TEXT,
+  wisp_id TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  updated_at TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_cleanup_rig ON cleanup_state(rig, updated_at DESC);
+CREATE TABLE IF NOT EXISTS dependency_health (
+  dependency_key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  scope TEXT,
+  status TEXT NOT NULL,
+  detail TEXT,
+  checked_at TEXT NOT NULL,
+  last_healthy_at TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_dependency_status ON dependency_health(status, checked_at DESC);
 `
 
 // Store is a lightweight adapter over a local SQLite control-plane database.

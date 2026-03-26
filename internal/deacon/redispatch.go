@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 )
 
 // Default parameters for re-dispatch rate-limiting.
@@ -59,12 +61,12 @@ type BeadRedispatchState struct {
 
 // RedispatchResult describes the outcome of a re-dispatch attempt.
 type RedispatchResult struct {
-	BeadID     string `json:"bead_id"`
-	Action     string `json:"action"` // "redispatched", "cooldown", "escalated", "error"
-	TargetRig  string `json:"target_rig,omitempty"`
-	Attempts   int    `json:"attempts"`
-	Message    string `json:"message,omitempty"`
-	Error      error  `json:"error,omitempty"`
+	BeadID    string `json:"bead_id"`
+	Action    string `json:"action"` // "redispatched", "cooldown", "escalated", "error"
+	TargetRig string `json:"target_rig,omitempty"`
+	Attempts  int    `json:"attempts"`
+	Message   string `json:"message,omitempty"`
+	Error     error  `json:"error,omitempty"`
 }
 
 // RedispatchStateFile returns the path to the re-dispatch state file.
@@ -194,16 +196,19 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 	if err != nil {
 		result.Action = "error"
 		result.Error = fmt.Errorf("loading redispatch state: %w", err)
+		logRedispatchDecision(townRoot, sourceRig, "", result, maxAttempts)
 		return result
 	}
 
-	beadState := state.GetBeadState(beadID)
+	beadState, store := loadMergedRedispatchState(townRoot, state, beadID)
 	result.Attempts = beadState.AttemptCount
 
 	// Check if already escalated
 	if beadState.Escalated {
 		result.Action = "already-escalated"
 		result.Message = fmt.Sprintf("bead already escalated to Mayor at %s", beadState.EscalatedAt.Format(time.RFC3339))
+		persistRedispatchState(townRoot, state, beadID, sourceRig, beadState.LastRig, "already-escalated", cooldown, beadState, store)
+		logRedispatchDecision(townRoot, sourceRig, beadState.LastRig, result, maxAttempts)
 		return result
 	}
 
@@ -212,6 +217,8 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 		remaining := beadState.CooldownRemaining(cooldown)
 		result.Action = "cooldown"
 		result.Message = fmt.Sprintf("in cooldown (remaining: %s)", remaining.Round(time.Second))
+		persistRedispatchState(townRoot, state, beadID, sourceRig, beadState.LastRig, "cooldown", cooldown, beadState, store)
+		logRedispatchDecision(townRoot, sourceRig, beadState.LastRig, result, maxAttempts)
 		return result
 	}
 
@@ -230,11 +237,12 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 			result.Message = fmt.Sprintf("escalated to Mayor after %d failed re-dispatches", beadState.AttemptCount)
 		}
 
-		// Save state regardless of escalation success
+		persistRedispatchState(townRoot, state, beadID, sourceRig, beadState.LastRig, "escalated", cooldown, beadState, store)
 		if saveErr := SaveRedispatchState(townRoot, state); saveErr != nil {
 			// Log but don't fail - escalation mail was already sent
 			result.Message += fmt.Sprintf(" (warning: state save failed: %v)", saveErr)
 		}
+		logRedispatchDecision(townRoot, sourceRig, beadState.LastRig, result, maxAttempts)
 
 		return result
 	}
@@ -247,6 +255,8 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 	if targetRig == "" {
 		result.Action = "error"
 		result.Error = fmt.Errorf("cannot determine target rig for bead %s", beadID)
+		persistRedispatchState(townRoot, state, beadID, sourceRig, targetRig, "error", cooldown, beadState, store)
+		logRedispatchDecision(townRoot, sourceRig, targetRig, result, maxAttempts)
 		return result
 	}
 	result.TargetRig = targetRig
@@ -263,6 +273,8 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 		} else {
 			result.Message = fmt.Sprintf("bead status is %q (expected open)", beadStatus)
 		}
+		persistRedispatchState(townRoot, state, beadID, sourceRig, targetRig, "skipped", cooldown, beadState, store)
+		logRedispatchDecision(townRoot, sourceRig, targetRig, result, maxAttempts)
 		return result
 	}
 
@@ -274,7 +286,8 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 
 		// Record the failed attempt
 		beadState.RecordAttempt(targetRig)
-		_ = SaveRedispatchState(townRoot, state)
+		persistRedispatchState(townRoot, state, beadID, sourceRig, targetRig, "error", cooldown, beadState, store)
+		logRedispatchDecision(townRoot, sourceRig, targetRig, result, maxAttempts)
 
 		return result
 	}
@@ -285,10 +298,11 @@ func Redispatch(townRoot, beadID, sourceRig string, maxAttempts int, cooldown ti
 	result.Attempts = beadState.AttemptCount
 	result.Message = fmt.Sprintf("re-dispatched to %s (attempt %d/%d)", targetRig, beadState.AttemptCount, maxAttempts)
 
-	// Save state
+	persistRedispatchState(townRoot, state, beadID, sourceRig, targetRig, "redispatched", cooldown, beadState, store)
 	if saveErr := SaveRedispatchState(townRoot, state); saveErr != nil {
 		result.Message += fmt.Sprintf(" (warning: state save failed: %v)", saveErr)
 	}
+	logRedispatchDecision(townRoot, sourceRig, targetRig, result, maxAttempts)
 
 	return result
 }
@@ -307,6 +321,9 @@ func PruneRedispatchState(townRoot string) (int, error) {
 		// Remove entries for beads that are closed, or that we can't find
 		if status == "closed" || status == "" {
 			delete(state.Beads, beadID)
+			if store, err := controlplane.Open(townRoot); err == nil {
+				_ = store.DeleteRedispatchRecord(beadID)
+			}
 			pruned++
 		}
 	}
@@ -318,6 +335,141 @@ func PruneRedispatchState(townRoot string) (int, error) {
 	}
 
 	return pruned, nil
+}
+
+func loadMergedRedispatchState(townRoot string, state *RedispatchState, beadID string) (*BeadRedispatchState, *controlplane.Store) {
+	beadState := state.GetBeadState(beadID)
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		return beadState, nil
+	}
+
+	record, err := store.GetRedispatchRecord(beadID)
+	if err != nil || record == nil {
+		if beadState.AttemptCount > 0 || beadState.Escalated {
+			persistRedispatchState(townRoot, state, beadID, "", beadState.LastRig, "projected", DefaultRedispatchCooldown, beadState, store)
+		}
+		return beadState, store
+	}
+
+	if record.AttemptCount > beadState.AttemptCount {
+		beadState.AttemptCount = record.AttemptCount
+	}
+	if ts := parseRedispatchTime(record.LastAttemptTime); ts.After(beadState.LastAttemptTime) {
+		beadState.LastAttemptTime = ts
+	}
+	if record.TargetRig != "" {
+		beadState.LastRig = record.TargetRig
+	} else if beadState.LastRig == "" {
+		beadState.LastRig = record.SourceRig
+	}
+	if record.Escalated {
+		beadState.Escalated = true
+	}
+	if ts := parseRedispatchTime(record.EscalatedAt); ts.After(beadState.EscalatedAt) {
+		beadState.EscalatedAt = ts
+	}
+	persistRedispatchState(townRoot, state, beadID, record.SourceRig, record.TargetRig, record.LastAction, DefaultRedispatchCooldown, beadState, store)
+	return beadState, store
+}
+
+func persistRedispatchState(townRoot string, state *RedispatchState, beadID, sourceRig, targetRig, action string, cooldown time.Duration, beadState *BeadRedispatchState, store *controlplane.Store) {
+	_ = SaveRedispatchState(townRoot, state)
+	if store == nil {
+		return
+	}
+	cooldownUntil := ""
+	if beadState != nil && !beadState.LastAttemptTime.IsZero() && cooldown > 0 {
+		cooldownUntil = beadState.LastAttemptTime.Add(cooldown).UTC().Format(time.RFC3339)
+	}
+	lastAttempt := ""
+	escalatedAt := ""
+	if beadState != nil {
+		if !beadState.LastAttemptTime.IsZero() {
+			lastAttempt = beadState.LastAttemptTime.UTC().Format(time.RFC3339)
+		}
+		if !beadState.EscalatedAt.IsZero() {
+			escalatedAt = beadState.EscalatedAt.UTC().Format(time.RFC3339)
+		}
+	}
+	_ = store.UpsertRedispatchRecord(controlplane.RedispatchRecord{
+		BeadID:          beadID,
+		SourceRig:       sourceRig,
+		TargetRig:       targetRig,
+		AttemptCount:    beadState.AttemptCount,
+		LastAttemptTime: lastAttempt,
+		CooldownUntil:   cooldownUntil,
+		Escalated:       beadState.Escalated,
+		EscalatedAt:     escalatedAt,
+		LastAction:      action,
+		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
+		Evidence: map[string]interface{}{
+			"projection_file": RedispatchStateFile(townRoot),
+			"source":          "deacon",
+		},
+	})
+}
+
+func logRedispatchDecision(townRoot, sourceRig, targetRig string, result *RedispatchResult, maxAttempts int) {
+	if result == nil {
+		return
+	}
+	outcome := "success"
+	if result.Action == "cooldown" || result.Action == "skipped" || result.Action == "already-escalated" {
+		outcome = "deferred"
+	}
+	if result.Error != nil || result.Action == "error" {
+		outcome = "error"
+	}
+	reason := result.Message
+	if result.Error != nil {
+		reason = result.Error.Error()
+	}
+	_ = events.LogEventAt(townRoot, events.Event{
+		Kind:       events.TypeRedispatch,
+		Type:       events.TypeRedispatch,
+		Actor:      deaconActor(sourceRig),
+		Role:       "deacon",
+		Rig:        firstNonEmpty(targetRig, sourceRig),
+		BeadID:     result.BeadID,
+		Outcome:    outcome,
+		Reason:     reason,
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"action":       result.Action,
+			"attempts":     result.Attempts,
+			"max_attempts": maxAttempts,
+			"source_rig":   sourceRig,
+			"target_rig":   targetRig,
+		},
+	})
+}
+
+func parseRedispatchTime(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+func deaconActor(rig string) string {
+	if rig != "" {
+		return fmt.Sprintf("%s/deacon", rig)
+	}
+	return "deacon"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // resolveRigFromBead determines the rig that owns a bead based on its prefix.

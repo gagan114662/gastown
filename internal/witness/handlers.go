@@ -1456,6 +1456,7 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 		existingWisp := findAnyCleanupWisp(bd, workDir, polecatName)
 		if existingWisp != "" {
 			zombie.Action = fmt.Sprintf("cleanup-deferred-acp (cleanup_status=%s, existing-wisp=%s)", cleanupStatus, existingWisp)
+			recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-deferred-acp", "mayor-acp", existingWisp, nil)
 			return
 		}
 		wispID, wispErr := createCleanupWisp(bd, workDir, polecatName, hookBead, "")
@@ -1463,12 +1464,14 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 			zombie.Error = wispErr
 		}
 		zombie.Action = fmt.Sprintf("cleanup-deferred-acp:%s (Mayor ACP session active)", wispID)
+		recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-deferred-acp", "mayor-acp", wispID, wispErr)
 		return
 	}
 
 	switch cleanupStatus {
 	case "clean", "":
 		zombie.Action = "restarted"
+		recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "restart-requested", "", "", nil)
 
 	case "has_uncommitted", "has_stash", "has_unpushed":
 		// Dirty state — create cleanup wisp for tracking if not already tracked.
@@ -1479,6 +1482,7 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 		existingWisp := findAnyCleanupWisp(bd, workDir, polecatName)
 		if existingWisp != "" {
 			zombie.Action = fmt.Sprintf("already-tracked (cleanup_status=%s, existing-wisp=%s)", cleanupStatus, existingWisp)
+			recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-tracked", cleanupStatus, existingWisp, nil)
 			break
 		}
 
@@ -1489,6 +1493,7 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 		if wispErr != nil {
 			zombie.Error = fmt.Errorf("cleanup wisp: %w", wispErr)
 			zombie.Action = fmt.Sprintf("restarted-dirty (cleanup_status=%s, wisp-failed)", cleanupStatus)
+			recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-wisp-failed", cleanupStatus, "", wispErr)
 			break
 		}
 
@@ -1505,15 +1510,18 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 				_, _ = bd.Exec(workDir, "close", wispID, "--reason=duplicate: concurrent patrol race (gt-7vs1)")
 				zombie.Action = fmt.Sprintf("already-tracked (cleanup_status=%s, existing-wisp=%s, closed-dup=%s)", cleanupStatus, allWisps[0], wispID)
 				skipRestart = true
+				recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-tracked", cleanupStatus, allWisps[0], nil)
 			} else {
 				// Won the race — clean up the other patrol's duplicate(s).
 				for _, w := range allWisps[1:] {
 					_, _ = bd.Exec(workDir, "close", w, "--reason=duplicate: concurrent patrol race (gt-7vs1)")
 				}
 				zombie.Action = fmt.Sprintf("restarted-dirty (cleanup_status=%s, wisp=%s)", cleanupStatus, wispID)
+				recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-tracked", cleanupStatus, wispID, nil)
 			}
 		} else {
 			zombie.Action = fmt.Sprintf("restarted-dirty (cleanup_status=%s, wisp=%s)", cleanupStatus, wispID)
+			recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "cleanup-tracked", cleanupStatus, wispID, nil)
 		}
 	}
 
@@ -1523,6 +1531,7 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 
 	// Restart regardless of cleanup state — the worktree is preserved.
 	if err := RestartPolecatSession(workDir, rigName, polecatName); err != nil {
+		recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "restart-failed", cleanupStatus, "", err)
 		if zombie.Error == nil {
 			zombie.Error = fmt.Errorf("restart: %w", err)
 		} else {
@@ -1531,6 +1540,8 @@ func handleZombieRestart(bd *BdCli, workDir, rigName, polecatName, hookBead, cle
 		if zombie.Action == "restarted" {
 			zombie.Action = fmt.Sprintf("restart-failed: %v", err)
 		}
+	} else {
+		recordCleanupStateTransition(townRoot, rigName, polecatName, hookBead, "restarted", cleanupStatus, "", nil)
 	}
 }
 
@@ -1839,12 +1850,12 @@ func processDiscoveredCompletion(bd *BdCli, workDir, rigName string, payload *Po
 // Used to avoid redundant subprocess invocations during zombie detection, where the same
 // agent bead was previously queried 3-5 times per polecat per patrol cycle. (gt-2gra)
 type agentBeadSnapshot struct {
-	AgentState  string
-	HookBead    string
-	Labels      []string
-	UpdatedAt   string
-	ActiveMR    string
-	Fields      *beads.AgentFields // parsed from description
+	AgentState string
+	HookBead   string
+	Labels     []string
+	UpdatedAt  string
+	ActiveMR   string
+	Fields     *beads.AgentFields // parsed from description
 }
 
 // fetchAgentBeadSnapshot fetches all agent bead data in a single bd show call.
@@ -2023,13 +2034,13 @@ func getBeadStatus(bd *BdCli, workDir, beadID string) string {
 
 // resetAbandonedBead resets a dead polecat's hooked bead so it can be re-dispatched.
 // If the bead is in "hooked" or "in_progress" status, it:
-// 0. Checks if the polecat's work is already on main — if so, closes
-//    the bead instead of resetting (prevents re-dispatch of completed work)
-// 1. Records the respawn in the witness spawn-count ledger
-// 2. Resets status to open
-// 3. Clears assignee
-// 4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
-//    prefix and Urgent priority when count exceeds max bead respawns config)
+//  0. Checks if the polecat's work is already on main — if so, closes
+//     the bead instead of resetting (prevents re-dispatch of completed work)
+//  1. Records the respawn in the witness spawn-count ledger
+//  2. Resets status to open
+//  3. Clears assignee
+//  4. Sends mail to deacon for re-dispatch (includes respawn count; SPAWN_STORM
+//     prefix and Urgent priority when count exceeds max bead respawns config)
 //
 // Returns true if the bead was recovered.
 func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName string, router *mail.Router) bool {
@@ -2064,6 +2075,7 @@ func resetAbandonedBead(bd *BdCli, workDir, rigName, hookBead, polecatName strin
 	// This prevents the witness→deacon→spawn feedback loop from creating
 	// unbounded polecats when a task repeatedly kills its polecat.
 	if ShouldBlockRespawn(workDir, hookBead) {
+		recordRespawnBlocked(trRoot, rigName, polecatName, hookBead, "respawn limit reached", maxRespawns)
 		if router != nil {
 			msg := &mail.Message{
 				From:     fmt.Sprintf("%s/witness", rigName),

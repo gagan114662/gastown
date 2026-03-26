@@ -39,8 +39,9 @@ var inspectTownCmd = &cobra.Command{
 			return encodeJSON(snapshot)
 		}
 
-		fmt.Printf("Town: %s\nStatus: %s\nReason: %s\nAgents: %d\nIncidents: %d\n",
-			snapshot.TownRoot, snapshot.Status, snapshot.StatusReason, len(snapshot.Agents), len(snapshot.Incidents))
+		fmt.Printf("Town: %s\nStatus: %s\nReason: %s\nAgents: %d\nIncidents: %d\nLeases: %d\nRespawns: %d\nRedispatches: %d\nCleanup States: %d\nDependencies: %d\n",
+			snapshot.TownRoot, snapshot.Status, snapshot.StatusReason, len(snapshot.Agents), len(snapshot.Incidents),
+			len(snapshot.Leases), len(snapshot.Respawns), len(snapshot.Redispatches), len(snapshot.CleanupStates), len(snapshot.Dependencies))
 		if len(snapshot.Conflicts) > 0 {
 			fmt.Println("Conflicts:")
 			for _, conflict := range snapshot.Conflicts {
@@ -73,6 +74,18 @@ var inspectAgentCmd = &cobra.Command{
 
 		fmt.Printf("Agent: %s\nSession: %s\nStatus: %s\nReason: %s\nAgreement: %s\n",
 			snapshot.AgentID, snapshot.Session, snapshot.Status, snapshot.StatusReason, snapshot.SourceAgreement)
+		if snapshot.Lease != nil {
+			fmt.Printf("Lease: %s (%s)\n", snapshot.Lease.Service, snapshot.Lease.Status)
+		}
+		if snapshot.Respawn != nil {
+			fmt.Printf("Respawn: %d/%d blocked=%t\n", snapshot.Respawn.Count, snapshot.Respawn.MaxCount, snapshot.Respawn.Blocked)
+		}
+		if snapshot.Redispatch != nil {
+			fmt.Printf("Redispatch: attempts=%d action=%s escalated=%t\n", snapshot.Redispatch.AttemptCount, snapshot.Redispatch.LastAction, snapshot.Redispatch.Escalated)
+		}
+		if snapshot.Cleanup != nil {
+			fmt.Printf("Cleanup: %s blocker=%s attempts=%d\n", snapshot.Cleanup.Status, snapshot.Cleanup.Blocker, snapshot.Cleanup.AttemptCount)
+		}
 		if len(snapshot.Conflicts) > 0 {
 			fmt.Println("Conflicts:")
 			for _, conflict := range snapshot.Conflicts {

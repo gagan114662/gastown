@@ -116,6 +116,36 @@
         {{end}}
 
         <div class="panels">
+            <div class="panel" id="operator-panel">
+                <div class="panel-header">
+                    <h2>🛰️ Operator</h2>
+                    <span class="count" id="operator-conflict-count">0</span>
+                    <button class="collapse-btn" aria-label="Toggle panel">▼</button>
+                    <button class="expand-btn">Expand</button>
+                </div>
+                <div class="panel-body">
+                    <div class="operator-summary" id="operator-summary">Loading operator state...</div>
+                    <div class="operator-grid">
+                        <div class="operator-section">
+                            <h3>Dependencies</h3>
+                            <div id="operator-dependencies" class="operator-list"></div>
+                        </div>
+                        <div class="operator-section">
+                            <h3>Leases</h3>
+                            <div id="operator-leases" class="operator-list"></div>
+                        </div>
+                        <div class="operator-section">
+                            <h3>Cleanup</h3>
+                            <div id="operator-cleanup" class="operator-list"></div>
+                        </div>
+                        <div class="operator-section">
+                            <h3>Supervisor Loops</h3>
+                            <div id="operator-loops" class="operator-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Row 1: Convoys, Polecats, Sessions -->
 
             <!-- Convoys Panel -->
