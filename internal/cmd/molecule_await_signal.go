@@ -405,7 +405,9 @@ func parseIntSimple(s string) (int, error) {
 // updateAgentHeartbeat updates the last_activity timestamp on an agent bead.
 // This proves the agent is alive and processing signals.
 func updateAgentHeartbeat(agentBead, beadsDir string) error {
-	cmd := exec.Command("bd", "agent", "heartbeat", agentBead)
+	// Use bd update --set-metadata (bd agent heartbeat subcommand does not exist)
+	ts := fmt.Sprintf("%d", time.Now().UnixMilli())
+	cmd := exec.Command("bd", "update", agentBead, "--set-metadata", "last_activity="+ts)
 	cmd.Env = append(os.Environ(), "BEADS_DIR="+beadsDir)
 	return cmd.Run()
 }
