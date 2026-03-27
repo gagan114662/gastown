@@ -16,13 +16,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/ctxstack"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
-	"github.com/steveyegge/gastown/internal/ctxstack"
 )
 
 var primeHookMode bool
@@ -461,7 +461,7 @@ var memoryTypeLabels = map[string]string{
 	"feedback":  "Behavioral Rules (from user feedback)",
 	"user":      "User Context",
 	"project":   "Project Context",
-	"reference":  "Reference Links",
+	"reference": "Reference Links",
 	"general":   "General",
 }
 

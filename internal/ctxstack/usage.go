@@ -94,7 +94,7 @@ func readTranscriptUsage(path string) (int, error) {
 		Type    string `json:"type"`
 		Message struct {
 			Usage struct {
-				InputTokens             int `json:"input_tokens"`
+				InputTokens              int `json:"input_tokens"`
 				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 			} `json:"usage"`

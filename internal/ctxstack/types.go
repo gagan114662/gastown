@@ -107,31 +107,31 @@ type PrimeSnapshot struct {
 }
 
 type BudgetConfig struct {
-	InstructionsPct   float64 `json:"instructions_pct,omitempty"`
-	RetrievedPct      float64 `json:"retrieved_pct,omitempty"`
-	CarryForwardPct   float64 `json:"carry_forward_pct,omitempty"`
-	ScratchpadPct     float64 `json:"scratchpad_pct,omitempty"`
-	OutputReservePct  float64 `json:"output_reserve_pct,omitempty"`
-	SafetySlackPct    float64 `json:"safety_slack_pct,omitempty"`
+	InstructionsPct  float64 `json:"instructions_pct,omitempty"`
+	RetrievedPct     float64 `json:"retrieved_pct,omitempty"`
+	CarryForwardPct  float64 `json:"carry_forward_pct,omitempty"`
+	ScratchpadPct    float64 `json:"scratchpad_pct,omitempty"`
+	OutputReservePct float64 `json:"output_reserve_pct,omitempty"`
+	SafetySlackPct   float64 `json:"safety_slack_pct,omitempty"`
 }
 
 type BudgetAllocation struct {
-	MaxTokens      int `json:"max_tokens"`
-	Instructions   int `json:"instructions"`
-	Retrieved      int `json:"retrieved"`
-	CarryForward   int `json:"carry_forward"`
-	Scratchpad     int `json:"scratchpad"`
-	OutputReserve  int `json:"output_reserve"`
-	SafetySlack    int `json:"safety_slack"`
+	MaxTokens     int `json:"max_tokens"`
+	Instructions  int `json:"instructions"`
+	Retrieved     int `json:"retrieved"`
+	CarryForward  int `json:"carry_forward"`
+	Scratchpad    int `json:"scratchpad"`
+	OutputReserve int `json:"output_reserve"`
+	SafetySlack   int `json:"safety_slack"`
 }
 
 type Thresholds struct {
-	WarnUsage    float64 `json:"warn_usage,omitempty"`
-	SoftUsage    float64 `json:"soft_usage,omitempty"`
-	HardUsage    float64 `json:"hard_usage,omitempty"`
-	WarnEntropy  float64 `json:"warn_entropy,omitempty"`
-	SoftEntropy  float64 `json:"soft_entropy,omitempty"`
-	HardEntropy  float64 `json:"hard_entropy,omitempty"`
+	WarnUsage   float64 `json:"warn_usage,omitempty"`
+	SoftUsage   float64 `json:"soft_usage,omitempty"`
+	HardUsage   float64 `json:"hard_usage,omitempty"`
+	WarnEntropy float64 `json:"warn_entropy,omitempty"`
+	SoftEntropy float64 `json:"soft_entropy,omitempty"`
+	HardEntropy float64 `json:"hard_entropy,omitempty"`
 }
 
 type RecoveryPolicy struct {

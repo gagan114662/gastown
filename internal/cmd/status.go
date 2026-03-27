@@ -120,29 +120,29 @@ type DNDInfo struct {
 
 // AgentRuntime represents the runtime state of an agent.
 type AgentRuntime struct {
-	Name         string `json:"name"`                    // Display name (e.g., "mayor", "witness")
-	Address      string `json:"address"`                 // Full address (e.g., "greenplace/witness")
-	Session      string `json:"session"`                 // tmux session name
-	Role         string `json:"role"`                    // Role type
-	Running      bool   `json:"running"`                 // Is tmux session running?
-	ACP          bool   `json:"acp"`                     // Is ACP session active?
-	HasWork      bool   `json:"has_work"`                // Has pinned work?
-	WorkTitle    string `json:"work_title,omitempty"`    // Title of pinned work
-	HookBead     string `json:"hook_bead,omitempty"`     // Pinned bead ID from agent bead
-	State             string `json:"state,omitempty"`              // Agent state from agent bead
-	NotificationLevel string `json:"notification_level,omitempty"` // Notification level (verbose, normal, muted)
-	UnreadMail        int    `json:"unread_mail"`                  // Number of unread messages
-	FirstSubject      string `json:"first_subject,omitempty"`      // Subject of first unread message
-	AgentAlias        string `json:"agent_alias,omitempty"`        // Configured agent name (e.g., "opus-46", "pi")
-	AgentInfo         string `json:"agent_info,omitempty"`         // Runtime summary (e.g., "claude/opus", "pi/kimi-k2p5")
-	ContextUsage            float64 `json:"context_usage,omitempty"`
-	EntropyScore            float64 `json:"entropy_score,omitempty"`
-	EntropyBand             string  `json:"entropy_band,omitempty"`
-	LastProgressAt          string  `json:"last_progress_at,omitempty"`
-	NativeContextUsage      bool    `json:"native_context_usage,omitempty"`
-	HookSummarySupport      bool    `json:"hook_summary_support,omitempty"`
-	ScratchpadSupport       bool    `json:"scratchpad_support,omitempty"`
-	EntropySignalSupport    bool    `json:"entropy_signal_support,omitempty"`
+	Name                 string  `json:"name"`                         // Display name (e.g., "mayor", "witness")
+	Address              string  `json:"address"`                      // Full address (e.g., "greenplace/witness")
+	Session              string  `json:"session"`                      // tmux session name
+	Role                 string  `json:"role"`                         // Role type
+	Running              bool    `json:"running"`                      // Is tmux session running?
+	ACP                  bool    `json:"acp"`                          // Is ACP session active?
+	HasWork              bool    `json:"has_work"`                     // Has pinned work?
+	WorkTitle            string  `json:"work_title,omitempty"`         // Title of pinned work
+	HookBead             string  `json:"hook_bead,omitempty"`          // Pinned bead ID from agent bead
+	State                string  `json:"state,omitempty"`              // Agent state from agent bead
+	NotificationLevel    string  `json:"notification_level,omitempty"` // Notification level (verbose, normal, muted)
+	UnreadMail           int     `json:"unread_mail"`                  // Number of unread messages
+	FirstSubject         string  `json:"first_subject,omitempty"`      // Subject of first unread message
+	AgentAlias           string  `json:"agent_alias,omitempty"`        // Configured agent name (e.g., "opus-46", "pi")
+	AgentInfo            string  `json:"agent_info,omitempty"`         // Runtime summary (e.g., "claude/opus", "pi/kimi-k2p5")
+	ContextUsage         float64 `json:"context_usage,omitempty"`
+	EntropyScore         float64 `json:"entropy_score,omitempty"`
+	EntropyBand          string  `json:"entropy_band,omitempty"`
+	LastProgressAt       string  `json:"last_progress_at,omitempty"`
+	NativeContextUsage   bool    `json:"native_context_usage,omitempty"`
+	HookSummarySupport   bool    `json:"hook_summary_support,omitempty"`
+	ScratchpadSupport    bool    `json:"scratchpad_support,omitempty"`
+	EntropySignalSupport bool    `json:"entropy_signal_support,omitempty"`
 }
 
 // RigStatus represents status of a single rig.

@@ -488,7 +488,6 @@ func DiscoverTargets(townRoot string) ([]Target, error) {
 	return targets, nil
 }
 
-
 // RoleLocation represents a discovered role directory in the workspace,
 // independent of any specific agent. Used by callers that need to resolve
 // agent configuration for each location (e.g., syncing non-Claude agents).

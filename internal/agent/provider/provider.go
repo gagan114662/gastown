@@ -19,19 +19,19 @@ const (
 )
 
 type AgentStatus struct {
-	State                   ProviderState `json:"state"`
-	SessionID               string        `json:"session_id,omitempty"`
-	AgentName               string        `json:"agent_name,omitempty"`
-	Version                 string        `json:"version,omitempty"`
-	Error                   string        `json:"error,omitempty"`
-	ContextUsage            float64       `json:"context_usage,omitempty"`
-	EntropyScore            float64       `json:"entropy_score,omitempty"`
-	EntropyBand             string        `json:"entropy_band,omitempty"`
-	LastProgressAt          *time.Time    `json:"last_progress_at,omitempty"`
-	NativeContextUsage      bool          `json:"native_context_usage,omitempty"`
-	HookSummarySupport      bool          `json:"hook_summary_support,omitempty"`
-	ScratchpadSupport       bool          `json:"scratchpad_support,omitempty"`
-	EntropySignalSupport    bool          `json:"entropy_signal_support,omitempty"`
+	State                ProviderState `json:"state"`
+	SessionID            string        `json:"session_id,omitempty"`
+	AgentName            string        `json:"agent_name,omitempty"`
+	Version              string        `json:"version,omitempty"`
+	Error                string        `json:"error,omitempty"`
+	ContextUsage         float64       `json:"context_usage,omitempty"`
+	EntropyScore         float64       `json:"entropy_score,omitempty"`
+	EntropyBand          string        `json:"entropy_band,omitempty"`
+	LastProgressAt       *time.Time    `json:"last_progress_at,omitempty"`
+	NativeContextUsage   bool          `json:"native_context_usage,omitempty"`
+	HookSummarySupport   bool          `json:"hook_summary_support,omitempty"`
+	ScratchpadSupport    bool          `json:"scratchpad_support,omitempty"`
+	EntropySignalSupport bool          `json:"entropy_signal_support,omitempty"`
 }
 
 type ToolCallback func(ctx context.Context, name string, args map[string]any) (CallToolResult, error)
