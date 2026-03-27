@@ -18,6 +18,7 @@ import (
 	beadsdk "github.com/steveyegge/beads"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/boot"
+	"github.com/steveyegge/gastown/internal/chromadb"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
 	"github.com/steveyegge/gastown/internal/deacon"
@@ -53,6 +54,7 @@ type Daemon struct {
 	convoyManager *ConvoyManager
 	beadsStores   map[string]beadsdk.Storage
 	doltServer    *DoltServerManager
+	chromaServer  *chromadb.Server
 	krcPruner     *KRCPruner
 
 	// disabledPatrols is loaded from town settings (disabled_patrols field).
@@ -411,6 +413,16 @@ func (d *Daemon) Run() error {
 			d.logger.Printf("Warning: failed to start KRC pruner: %v", err)
 		} else {
 			d.logger.Println("KRC pruner started")
+		}
+	}
+
+	// Start Chroma vector DB server for agent memory (optional).
+	if !d.config.DisableChroma {
+		chromaCfg := chromadb.DefaultServerConfig()
+		d.chromaServer = chromadb.NewServer(chromaCfg, d.logger)
+		if err := d.chromaServer.Start(d.ctx); err != nil {
+			d.logger.Printf("WARNING: Chroma server failed to start: %v (agent memory disabled)", err)
+			d.chromaServer = nil
 		}
 	}
 
@@ -1696,6 +1708,11 @@ func (d *Daemon) shutdown(state *State) error { //nolint:unparam // error return
 		} else {
 			d.logger.Println("Dolt server stopped")
 		}
+	}
+
+	// Stop Chroma server if we started it.
+	if d.chromaServer != nil {
+		d.chromaServer.Stop()
 	}
 
 	// Flush and stop OTel providers (5s deadline to avoid blocking shutdown).

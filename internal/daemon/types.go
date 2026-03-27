@@ -32,6 +32,9 @@ type Config struct {
 
 	// PidFile is the path to the PID file.
 	PidFile string `json:"pid_file"`
+
+	// DisableChroma prevents the daemon from starting the embedded Chroma server.
+	DisableChroma bool `json:"disable_chroma,omitempty"`
 }
 
 // DefaultConfig returns the default daemon configuration.
