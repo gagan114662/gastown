@@ -94,6 +94,9 @@ func newTestEngineer(t *testing.T, workDir string, g *gitpkg.Git) *Engineer {
 	e.git = g
 	e.workDir = workDir
 	e.output = &bytes.Buffer{}
+	// Clear default gates so tests that don't configure gates get auto-pass behaviour.
+	// Tests that want specific gates set e.config.Gates explicitly after calling this.
+	e.config.Gates = nil
 	// No-op merge slot functions for tests
 	e.mergeSlotEnsureExists = func() (string, error) { return "test-slot", nil }
 	e.mergeSlotAcquire = func(holder string, addWaiter bool) (*beads.MergeSlotStatus, error) {
