@@ -12,4 +12,4 @@ if ! orb status 2>/dev/null | grep -q "Running"; then
 fi
 
 echo "[agent-ci] Running CI checks via OrbStack (test, lint, vuln-check)..."
-AI_AGENT=1 npx agent-ci run --workflow .github/workflows/ci-local.yml
+AI_AGENT=1 npx @redwoodjs/agent-ci@latest run --workflow .github/workflows/ci-local.yml
