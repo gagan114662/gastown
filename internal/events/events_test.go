@@ -4,6 +4,40 @@ import (
 	"testing"
 )
 
+func TestPrepareEvent_InferFields(t *testing.T) {
+	event := PrepareEvent(Event{
+		Type:  TypeDone,
+		Actor: "gastown/polecats/nux",
+		Payload: map[string]interface{}{
+			"bead":        "gt-123",
+			"reason":      "completed",
+			"duration_ms": 42,
+		},
+	})
+
+	if event.EventID == "" {
+		t.Fatal("EventID should be set")
+	}
+	if event.Kind != TypeDone {
+		t.Fatalf("Kind = %q, want %q", event.Kind, TypeDone)
+	}
+	if event.Rig != "gastown" {
+		t.Fatalf("Rig = %q, want gastown", event.Rig)
+	}
+	if event.Role != "polecat" {
+		t.Fatalf("Role = %q, want polecat", event.Role)
+	}
+	if event.BeadID != "gt-123" {
+		t.Fatalf("BeadID = %q, want gt-123", event.BeadID)
+	}
+	if event.Reason != "completed" {
+		t.Fatalf("Reason = %q, want completed", event.Reason)
+	}
+	if event.DurationMs != 42 {
+		t.Fatalf("DurationMs = %d, want 42", event.DurationMs)
+	}
+}
+
 func TestSlingPayload(t *testing.T) {
 	p := SlingPayload("gt-123", "gastown")
 	if p["bead"] != "gt-123" {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -23,7 +24,31 @@ import (
 // (except GT_DOLT_PORT and BEADS_DOLT_PORT) and HOME overridden to tmpHome.
 // This isolates gt/bd processes from the host while preserving test Dolt routing.
 func cleanSchedulerTestEnv(tmpHome string) []string {
-	return testutil.CleanGTEnv("HOME=" + tmpHome)
+	env := testutil.CleanGTEnv("HOME=" + tmpHome)
+	env = filterEnvKey(env, "BEADS_DIR")
+	env = filterEnvKey(env, "BEADS_DB")
+	env = filterEnvKey(env, "BEADS_DOLT_SERVER_DATABASE")
+	return env
+}
+
+func schedulerBDEnv(dir string) []string {
+	beadsDir := beads.ResolveBeadsDir(dir)
+	env := testutil.CleanGTEnv()
+	env = filterEnvKey(env, "BEADS_DIR")
+	env = filterEnvKey(env, "BEADS_DB")
+	env = filterEnvKey(env, "BEADS_DOLT_SERVER_DATABASE")
+	env = append(env, "BEADS_DIR="+beadsDir)
+	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
+		env = append(env, dbEnv)
+	}
+	return env
+}
+
+func newSchedulerBDCommand(dir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("bd", args...)
+	cmd.Dir = dir
+	cmd.Env = schedulerBDEnv(dir)
+	return cmd
 }
 
 // --- File helpers ---
@@ -119,13 +144,11 @@ func createTestBead(t *testing.T, dir, title string) string {
 	t.Helper()
 	args := []string{"create", "--title=" + title, "--type=task",
 		"--description=Integration test bead", "--json"}
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		// Capture stderr for diagnostics
-		cmd2 := exec.Command("bd", args...)
-		cmd2.Dir = dir
+		cmd2 := newSchedulerBDCommand(dir, args...)
 		combined, _ := cmd2.CombinedOutput()
 		t.Fatalf("bd create failed: %v\n%s", err, combined)
 	}
@@ -145,8 +168,7 @@ func createTestBead(t *testing.T, dir, title string) string {
 // Runs bd show --json from dir and inspects the labels array.
 func beadHasLabel(t *testing.T, beadID, label, dir string) bool {
 	t.Helper()
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, "show", beadID, "--json", "--allow-stale")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd show %s failed: %v", beadID, err)
@@ -171,8 +193,7 @@ func beadHasLabel(t *testing.T, beadID, label, dir string) bool {
 // getBeadDescription returns the description of a bead via bd show --json.
 func getBeadDescription(t *testing.T, beadID, dir string) string {
 	t.Helper()
-	cmd := exec.Command("bd", "show", beadID, "--json", "--allow-stale")
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, "show", beadID, "--json", "--allow-stale")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd show %s failed: %v", beadID, err)
@@ -192,8 +213,7 @@ func getBeadDescription(t *testing.T, beadID, dir string) string {
 // updateBeadDescription updates a bead's description via bd update.
 func updateBeadDescription(t *testing.T, beadID, description, dir string) {
 	t.Helper()
-	cmd := exec.Command("bd", "update", beadID, "--description="+description)
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, "update", beadID, "--description="+description)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd update %s description failed: %v\n%s", beadID, err, out)
 	}
@@ -202,8 +222,7 @@ func updateBeadDescription(t *testing.T, beadID, description, dir string) {
 // addBeadLabel adds a label to a bead via bd update.
 func addBeadLabel(t *testing.T, beadID, label, dir string) {
 	t.Helper()
-	cmd := exec.Command("bd", "update", beadID, "--add-label="+label)
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, "update", beadID, "--add-label="+label)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd update %s --add-label=%s failed: %v\n%s", beadID, label, err, out)
 	}
@@ -212,8 +231,7 @@ func addBeadLabel(t *testing.T, beadID, label, dir string) {
 // addBeadDependency adds a blocking dependency: blocker blocks blocked.
 func addBeadDependency(t *testing.T, blocked, blocker, dir string) {
 	t.Helper()
-	cmd := exec.Command("bd", "dep", "add", blocked, blocker)
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, "dep", "add", blocked, blocker)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd dep add %s %s failed: %v\n%s", blocked, blocker, err, out)
 	}
@@ -224,8 +242,7 @@ func addBeadDependency(t *testing.T, blocked, blocker, dir string) {
 // be in a different DB if routes.jsonl is present in dir's .beads/.
 func addBeadDependencyOfType(t *testing.T, from, to, depType, dir string) {
 	t.Helper()
-	cmd := exec.Command("bd", "dep", "add", from, to, "--type="+depType)
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, "dep", "add", from, to, "--type="+depType)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd dep add %s %s --type=%s failed: %v\n%s", from, to, depType, err, out)
 	}
@@ -237,12 +254,10 @@ func createTestBeadOfType(t *testing.T, dir, title, issueType string) string {
 	t.Helper()
 	args := []string{"create", "--title=" + title, "--type=" + issueType,
 		"--description=Integration test bead", "--json"}
-	cmd := exec.Command("bd", args...)
-	cmd.Dir = dir
+	cmd := newSchedulerBDCommand(dir, args...)
 	out, err := cmd.Output()
 	if err != nil {
-		cmd2 := exec.Command("bd", args...)
-		cmd2.Dir = dir
+		cmd2 := newSchedulerBDCommand(dir, args...)
 		combined, _ := cmd2.CombinedOutput()
 		t.Fatalf("bd create --type=%s failed: %v\n%s", issueType, err, combined)
 	}
