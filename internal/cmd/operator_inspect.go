@@ -12,11 +12,6 @@ import (
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
-var (
-	inspectJSON   bool
-	operatorLimit int
-)
-
 var inspectCmd = &cobra.Command{
 	Use:     "inspect",
 	GroupID: GroupDiag,
@@ -35,7 +30,7 @@ var inspectTownCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if inspectJSON {
+		if commandJSON(cmd) {
 			return encodeJSON(snapshot)
 		}
 
@@ -68,7 +63,7 @@ var inspectAgentCmd = &cobra.Command{
 		if snapshot == nil {
 			return fmt.Errorf("agent not found: %s", args[0])
 		}
-		if inspectJSON {
+		if commandJSON(cmd) {
 			return encodeJSON(snapshot)
 		}
 
@@ -120,11 +115,11 @@ var operatorEventsTailCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		events, err := store.ListEvents(operatorLimit)
+		events, err := store.ListEvents(commandLimit(cmd, 20))
 		if err != nil {
 			return err
 		}
-		if inspectJSON {
+		if commandJSON(cmd) {
 			return encodeJSON(events)
 		}
 
@@ -151,11 +146,11 @@ var incidentsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		incidents, err := store.ListIncidents(operatorLimit)
+		incidents, err := store.ListIncidents(commandLimit(cmd, 20))
 		if err != nil {
 			return err
 		}
-		if inspectJSON {
+		if commandJSON(cmd) {
 			return encodeJSON(incidents)
 		}
 
@@ -170,12 +165,12 @@ var incidentsCmd = &cobra.Command{
 }
 
 func init() {
-	inspectTownCmd.Flags().BoolVar(&inspectJSON, "json", false, "Output as JSON")
-	inspectAgentCmd.Flags().BoolVar(&inspectJSON, "json", false, "Output as JSON")
-	operatorEventsTailCmd.Flags().BoolVar(&inspectJSON, "json", false, "Output as JSON")
-	incidentsCmd.Flags().BoolVar(&inspectJSON, "json", false, "Output as JSON")
-	operatorEventsTailCmd.Flags().IntVarP(&operatorLimit, "limit", "n", 20, "Number of events to show")
-	incidentsCmd.Flags().IntVarP(&operatorLimit, "limit", "n", 20, "Number of incidents to show")
+	inspectTownCmd.Flags().Bool("json", false, "Output as JSON")
+	inspectAgentCmd.Flags().Bool("json", false, "Output as JSON")
+	operatorEventsTailCmd.Flags().Bool("json", false, "Output as JSON")
+	incidentsCmd.Flags().Bool("json", false, "Output as JSON")
+	operatorEventsTailCmd.Flags().IntP("limit", "n", 20, "Number of events to show")
+	incidentsCmd.Flags().IntP("limit", "n", 20, "Number of incidents to show")
 
 	inspectCmd.AddCommand(inspectTownCmd)
 	inspectCmd.AddCommand(inspectAgentCmd)
@@ -189,4 +184,17 @@ func encodeJSON(value interface{}) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+func commandJSON(cmd *cobra.Command) bool {
+	value, err := cmd.Flags().GetBool("json")
+	return err == nil && value
+}
+
+func commandLimit(cmd *cobra.Command, fallback int) int {
+	value, err := cmd.Flags().GetInt("limit")
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }

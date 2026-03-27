@@ -61,6 +61,63 @@ func TestStoreRecordEventAndIncident(t *testing.T) {
 	}
 }
 
+func TestStoreRecordEventEscapesMultilineStrings(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not installed")
+	}
+
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	event := TownEvent{
+		EventID:    "evt-'quoted'",
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Kind:       "session_death",
+		Type:       "session_death",
+		Actor:      "mayor's helper",
+		Session:    "gt-test\nagent",
+		Outcome:    "error",
+		Reason:     "can't recover\nneeds \"manual\" help",
+		Visibility: "both",
+		Source:     "gt",
+		Payload: map[string]interface{}{
+			"detail": "line one\nline two's",
+		},
+		Evidence: map[string]interface{}{
+			"path": "C:\\town\\logs\\agent's-session",
+		},
+	}
+	if err := store.RecordEvent(event); err != nil {
+		t.Fatalf("RecordEvent: %v", err)
+	}
+
+	events, err := store.ListEvents(10)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("ListEvents len = %d, want 1", len(events))
+	}
+	got := events[0]
+	if got.EventID != event.EventID {
+		t.Fatalf("EventID = %q, want %q", got.EventID, event.EventID)
+	}
+	if got.Session != event.Session {
+		t.Fatalf("Session = %q, want %q", got.Session, event.Session)
+	}
+	if got.Reason != event.Reason {
+		t.Fatalf("Reason = %q, want %q", got.Reason, event.Reason)
+	}
+	if detail, _ := got.Payload["detail"].(string); detail != event.Payload["detail"] {
+		t.Fatalf("Payload detail = %q, want %q", detail, event.Payload["detail"])
+	}
+	if path, _ := got.Evidence["path"].(string); path != event.Evidence["path"] {
+		t.Fatalf("Evidence path = %q, want %q", path, event.Evidence["path"])
+	}
+}
+
 func TestStoreUpsertAgentRuntime(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 not installed")
