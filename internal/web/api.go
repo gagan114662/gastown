@@ -10,13 +10,18 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
+	"github.com/steveyegge/gastown/internal/operatorview"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // CommandRequest is the JSON request body for /api/run.
@@ -136,7 +141,17 @@ func (h *APIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/ready" && r.Method == http.MethodGet:
 		h.handleReady(w, r)
 	case path == "/events" && r.Method == http.MethodGet:
-		h.handleSSE(w, r)
+		if wantsEventStream(r) {
+			h.handleSSE(w, r)
+		} else {
+			h.handleEventsJSON(w, r)
+		}
+	case path == "/state" && r.Method == http.MethodGet:
+		h.handleState(w, r)
+	case path == "/incidents" && r.Method == http.MethodGet:
+		h.handleIncidents(w, r)
+	case strings.HasPrefix(path, "/agents/") && r.Method == http.MethodGet:
+		h.handleAgent(w, r)
 	case path == "/session/preview" && r.Method == http.MethodGet:
 		h.handleSessionPreview(w, r)
 	default:
@@ -205,8 +220,7 @@ func (h *APIHandler) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	// Log command execution (but not for safe read-only commands to reduce noise)
 	if !meta.Safe || !resp.Success {
-		// Could add structured logging here
-		_ = meta // silence unused warning for now
+		h.logDashboardCommand(req.Command, meta, resp)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -277,6 +291,155 @@ func (h *APIHandler) sendError(w http.ResponseWriter, message string, status int
 		Success: false,
 		Error:   message,
 	})
+}
+
+func wantsEventStream(r *http.Request) bool {
+	if strings.EqualFold(r.URL.Query().Get("stream"), "sse") {
+		return true
+	}
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
+}
+
+func (h *APIHandler) findTownRoot() (string, error) {
+	if h.workDir != "" {
+		if townRoot, err := workspace.FindOrError(h.workDir); err == nil && townRoot != "" {
+			return townRoot, nil
+		}
+	}
+	return workspace.FindFromCwdOrError()
+}
+
+func (h *APIHandler) logDashboardCommand(command string, meta *CommandMeta, resp CommandResponse) {
+	townRoot, err := h.findTownRoot()
+	if err != nil {
+		return
+	}
+
+	visibility := events.VisibilityAudit
+	outcome := "success"
+	reason := ""
+	if !resp.Success {
+		visibility = events.VisibilityBoth
+		outcome = "error"
+		reason = resp.Error
+	}
+
+	event := events.PrepareEvent(events.Event{
+		Type:       events.TypeDashboardCommand,
+		Kind:       events.TypeDashboardCommand,
+		Actor:      "dashboard",
+		Role:       "operator",
+		Outcome:    outcome,
+		Reason:     reason,
+		DurationMs: resp.DurationMs,
+		Visibility: visibility,
+		Payload: map[string]interface{}{
+			"command":  command,
+			"category": meta.Category,
+			"safe":     meta.Safe,
+			"confirm":  meta.Confirm,
+		},
+		Evidence: map[string]interface{}{
+			"output_bytes": len(resp.Output),
+		},
+	})
+	_ = events.LogEventAt(townRoot, event)
+}
+
+func (h *APIHandler) handleEventsJSON(w http.ResponseWriter, _ *http.Request) {
+	townRoot, err := h.findTownRoot()
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	events, err := store.ListEvents(50)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"events": events,
+		"total":  len(events),
+	})
+}
+
+func (h *APIHandler) handleState(w http.ResponseWriter, _ *http.Request) {
+	townRoot, err := h.findTownRoot()
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	snapshot, err := operatorview.LoadTownSnapshot(townRoot)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snapshot)
+}
+
+func (h *APIHandler) handleIncidents(w http.ResponseWriter, _ *http.Request) {
+	townRoot, err := h.findTownRoot()
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	incidents, err := store.ListIncidents(50)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"incidents": incidents,
+		"total":     len(incidents),
+	})
+}
+
+func (h *APIHandler) handleAgent(w http.ResponseWriter, r *http.Request) {
+	townRoot, err := h.findTownRoot()
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	agentID := path.Base(strings.TrimPrefix(r.URL.Path, "/api/agents/"))
+	if agentID == "" || agentID == "." || agentID == "/" {
+		h.sendError(w, "missing agent id", http.StatusBadRequest)
+		return
+	}
+
+	snapshot, err := operatorview.LoadAgentSnapshot(townRoot, agentID)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if snapshot == nil {
+		h.sendError(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(snapshot)
 }
 
 // MailMessage represents a mail message for the API.

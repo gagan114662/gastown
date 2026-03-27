@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/controlplane"
 	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/polecat"
@@ -86,16 +87,29 @@ func SpawnPolecatForSling(rigName string, opts SlingSpawnOptions) (*SpawnedPolec
 	t := tmux.NewTmux()
 	polecatMgr := polecat.NewManager(r, polecatGit, t)
 
-	// Pre-spawn Dolt health check (gt-94llt7): verify Dolt is reachable before
-	// allocating a polecat. Prevents orphaned polecats when Dolt is down.
+	// Dolt checks are now visibility signals rather than hard admission gates.
+	// If Dolt is degraded, orchestration continues and the operator view shows
+	// the backlog and failed dependency checks explicitly.
 	if err := polecatMgr.CheckDoltHealth(); err != nil {
-		return nil, fmt.Errorf("pre-spawn health check failed: %w", err)
+		recordDependencyHealth(townRoot, r.Name, "dolt", "degraded", err.Error(), map[string]interface{}{
+			"phase": "spawn-health-check",
+		})
+		style.PrintWarning("Dolt health check failed, continuing without admission gate: %v", err)
+	} else {
+		recordDependencyHealth(townRoot, r.Name, "dolt", "healthy", "spawn health check passed", map[string]interface{}{
+			"phase": "spawn-health-check",
+		})
 	}
 
-	// Pre-spawn admission control (gt-1obzke): verify Dolt server has connection
-	// capacity before spawning. Prevents connection storms during mass sling.
 	if err := polecatMgr.CheckDoltServerCapacity(); err != nil {
-		return nil, fmt.Errorf("admission control: %w", err)
+		recordDependencyHealth(townRoot, r.Name, "dolt-capacity", "degraded", err.Error(), map[string]interface{}{
+			"phase": "spawn-capacity-check",
+		})
+		style.PrintWarning("Dolt capacity check failed, continuing without admission gate: %v", err)
+	} else {
+		recordDependencyHealth(townRoot, r.Name, "dolt-capacity", "healthy", "spawn capacity check passed", map[string]interface{}{
+			"phase": "spawn-capacity-check",
+		})
 	}
 
 	// Polecat count cap (clown show #22): refuse to spawn if there are already
@@ -508,4 +522,46 @@ func verifyWorktreeExists(clonePath string) error {
 	}
 
 	return nil
+}
+
+func recordDependencyHealth(townRoot, rigName, name, status, detail string, payload map[string]interface{}) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	lastHealthyAt := ""
+	if store, err := controlplane.Open(townRoot); err == nil {
+		if status == "healthy" {
+			lastHealthyAt = now
+		} else if existing, getErr := store.GetDependencyHealth(controlplane.DependencyKey(name, rigName)); getErr == nil && existing != nil {
+			lastHealthyAt = existing.LastHealthyAt
+		}
+		_ = store.RecordDependencyHealth(controlplane.DependencyHealth{
+			DependencyKey: controlplane.DependencyKey(name, rigName),
+			Name:          name,
+			Scope:         rigName,
+			Status:        status,
+			Detail:        detail,
+			CheckedAt:     now,
+			LastHealthyAt: lastHealthyAt,
+			Payload:       payload,
+		})
+	}
+
+	outcome := "success"
+	if status != "healthy" {
+		outcome = "error"
+	}
+	_ = events.LogEventAt(townRoot, events.Event{
+		Kind:       events.TypeDependencyHealth,
+		Type:       events.TypeDependencyHealth,
+		Actor:      "gt",
+		Rig:        rigName,
+		Outcome:    outcome,
+		Reason:     detail,
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"dependency": name,
+			"scope":      rigName,
+			"status":     status,
+		},
+		Evidence: payload,
+	})
 }

@@ -60,6 +60,9 @@ var beadsExemptCommands = map[string]bool{
 	"handoff":    true,
 	"costs":      true,
 	"feed":       true,
+	"inspect":    true,
+	"events":     true,
+	"incidents":  true,
 	"rig":        true,
 	"config":     true,
 	"install":    true,
@@ -84,6 +87,9 @@ var branchCheckExemptCommands = map[string]bool{
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
 	"upgrade":    true, // Post-install migration
+	"inspect":    true,
+	"events":     true,
+	"incidents":  true,
 }
 
 // persistentPreRun runs before every command.
