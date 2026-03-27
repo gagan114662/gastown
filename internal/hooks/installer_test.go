@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -248,6 +250,23 @@ func TestSyncForRole_JSONWhitespaceInsensitive(t *testing.T) {
 	}
 	if result != SyncUnchanged {
 		t.Errorf("expected SyncUnchanged for whitespace-only JSON difference, got %d", result)
+	}
+}
+
+func TestSubstituteGTBinary_JSONEscapesWindowsPath(t *testing.T) {
+	template, err := templateFS.ReadFile("templates/gemini/settings-interactive.json")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+
+	got := substituteGTBinary(template, "settings.json", `C:\Program Files\Gastown\gt.exe`)
+
+	var parsed any
+	if err := json.Unmarshal(got, &parsed); err != nil {
+		t.Fatalf("substituted JSON should stay valid: %v", err)
+	}
+	if !bytes.Contains(got, []byte(`C:\\Program Files\\Gastown\\gt.exe`)) {
+		t.Fatalf("expected escaped Windows path in JSON output, got %q", string(got))
 	}
 }
 

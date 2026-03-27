@@ -628,14 +628,15 @@ type WorkflowConfig struct {
 
 // RigSettings represents per-rig behavioral configuration (settings/config.json).
 type RigSettings struct {
-	Type       string            `json:"type"`                  // "rig-settings"
-	Version    int               `json:"version"`               // schema version
-	MergeQueue *MergeQueueConfig `json:"merge_queue,omitempty"` // merge queue settings
-	Theme      *ThemeConfig      `json:"theme,omitempty"`       // tmux theme settings
-	Namepool   *NamepoolConfig   `json:"namepool,omitempty"`    // polecat name pool settings
-	Crew       *CrewConfig       `json:"crew,omitempty"`        // crew startup settings
-	Workflow   *WorkflowConfig   `json:"workflow,omitempty"`    // workflow settings
-	Runtime    *RuntimeConfig    `json:"runtime,omitempty"`     // LLM runtime settings (deprecated: use Agent)
+	Type         string              `json:"type"`                    // "rig-settings"
+	Version      int                 `json:"version"`                 // schema version
+	MergeQueue   *MergeQueueConfig   `json:"merge_queue,omitempty"`   // merge queue settings
+	RepoContract *RepoContractConfig `json:"repo_contract,omitempty"` // canonical repo verifier/smoke/release contract
+	Theme        *ThemeConfig        `json:"theme,omitempty"`         // tmux theme settings
+	Namepool     *NamepoolConfig     `json:"namepool,omitempty"`      // polecat name pool settings
+	Crew         *CrewConfig         `json:"crew,omitempty"`          // crew startup settings
+	Workflow     *WorkflowConfig     `json:"workflow,omitempty"`      // workflow settings
+	Runtime      *RuntimeConfig      `json:"runtime,omitempty"`       // LLM runtime settings (deprecated: use Agent)
 
 	// Agent selects which agent preset to use for this rig.
 	// Can be a built-in preset ("claude", "gemini", "codex", "cursor", "auggie", "amp", "opencode", "copilot")
@@ -661,6 +662,49 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
+}
+
+// RepoContractConfig defines the repo-local safety contract Gastown should enforce.
+// This lives in the committed repo settings file so every role uses the same
+// verifier, smoke, and release checks.
+type RepoContractConfig struct {
+	// RepoType classifies the repo so prompts and automation can choose the
+	// right test bundle. Examples: "backend-api", "frontend-app", "worker".
+	RepoType string `json:"repo_type,omitempty"`
+
+	// EnforcementTier controls how much safety the repo expects. Supported
+	// values: "basic", "strong", "production". Empty defaults to "strong".
+	EnforcementTier string `json:"enforcement_tier,omitempty"`
+
+	// VerifyCommand is the canonical pre-merge verifier entrypoint.
+	VerifyCommand string `json:"verify_command,omitempty"`
+
+	// SmokeCommand is the canonical merged-result or post-deploy smoke check.
+	SmokeCommand string `json:"smoke_command,omitempty"`
+
+	// ReleaseCheckCommand is the canonical release/deploy gate entrypoint.
+	ReleaseCheckCommand string `json:"release_check_command,omitempty"`
+
+	// IntegrationCommand is the canonical integration test entrypoint.
+	IntegrationCommand string `json:"integration_command,omitempty"`
+
+	// E2ECommand is the canonical end-to-end test entrypoint.
+	E2ECommand string `json:"e2e_command,omitempty"`
+
+	// PerfCommand is the canonical performance budget check entrypoint.
+	PerfCommand string `json:"perf_command,omitempty"`
+
+	// RequiresMigrations indicates that schema or migration safety checks are required.
+	RequiresMigrations *bool `json:"requires_migrations,omitempty"`
+
+	// RequiresE2E indicates that end-to-end coverage is required before landing.
+	RequiresE2E *bool `json:"requires_e2e,omitempty"`
+
+	// RequiresSecurityScan indicates that dependency/security scanning is required.
+	RequiresSecurityScan *bool `json:"requires_security_scan,omitempty"`
+
+	// CriticalPaths lists the core user or data flows that must stay healthy.
+	CriticalPaths []string `json:"critical_paths,omitempty"`
 }
 
 // CrewConfig represents crew workspace settings for a rig.
@@ -1199,6 +1243,11 @@ type MergeQueueConfig struct {
 	// Enabled controls whether the merge queue is active.
 	Enabled bool `json:"enabled"`
 
+	// VerificationMode controls whether merge verification is advisory or strict.
+	// Advisory preserves legacy behavior. Strict blocks gt done/refinery when
+	// configured pre-merge verification gates fail.
+	VerificationMode string `json:"verification_mode,omitempty"`
+
 	// IntegrationBranchPolecatEnabled controls whether polecats auto-source
 	// their worktrees from integration branches when the parent epic has one.
 	// Nil defaults to true.
@@ -1248,6 +1297,10 @@ type MergeQueueConfig struct {
 	// TypecheckCommand is the command to run for type checking (e.g., tsc --noEmit).
 	TypecheckCommand string `json:"typecheck_command,omitempty"`
 
+	// AutoPush controls whether the refinery pushes merged results automatically.
+	// Nil defaults to true.
+	AutoPush *bool `json:"auto_push,omitempty"`
+
 	// DeleteMergedBranches controls whether to delete branches after merging.
 	// Nil defaults to true (merged branches are deleted).
 	DeleteMergedBranches *bool `json:"delete_merged_branches,omitempty"`
@@ -1275,12 +1328,79 @@ type MergeQueueConfig struct {
 	// is enabled. Valid values: "quick", "standard", "deep".
 	// Nil defaults to "standard".
 	ReviewDepth string `json:"review_depth,omitempty"`
+
+	// Gates defines named quality gates to run around the merge pipeline.
+	// Pre-merge gates run before submission/merge. Post-squash gates validate
+	// the merged result before push.
+	Gates map[string]*VerificationGateConfig `json:"gates,omitempty"`
+
+	// GatesParallel controls whether pre-merge gates may run concurrently.
+	GatesParallel *bool `json:"gates_parallel,omitempty"`
+}
+
+// RepoContract describes the repo-local safety contract Gastown should enforce.
+// This lives in committed repo settings so GitHub Actions, gt done, and
+// refinery can all use the same canonical entrypoints.
+type RepoContract struct {
+	RepoType            string          `json:"repo_type,omitempty"`
+	VerifyCommand       string          `json:"verify_command,omitempty"`
+	SmokeCommand        string          `json:"smoke_command,omitempty"`
+	ReleaseCheckCommand string          `json:"release_check_command,omitempty"`
+	IntegrationCommand  string          `json:"integration_command,omitempty"`
+	E2ECommand          string          `json:"e2e_command,omitempty"`
+	PerformanceCommand  string          `json:"performance_command,omitempty"`
+	CriticalPaths       []string        `json:"critical_paths,omitempty"`
+	GitHubCI            *GitHubCIConfig `json:"github_ci,omitempty"`
+}
+
+// GitHubCIConfig controls GitHub workflow assurance for a rig.
+type GitHubCIConfig struct {
+	Workflow string `json:"workflow,omitempty"`
+	Required *bool  `json:"required,omitempty"`
+}
+
+// VerificationGateConfig describes a single verification gate command.
+type VerificationGateConfig struct {
+	Cmd     string `json:"cmd"`
+	Timeout string `json:"timeout,omitempty"`
+	Phase   string `json:"phase,omitempty"`
+}
+
+// MergeQueueGateConfig defines a single merge-queue verification gate.
+type MergeQueueGateConfig struct {
+	// Cmd is the shell command to execute.
+	Cmd string `json:"cmd"`
+
+	// Timeout is the maximum duration the gate may run (e.g. "10m").
+	Timeout string `json:"timeout,omitempty"`
+
+	// Phase controls when this gate runs: "pre-merge" (default) or "post-squash".
+	Phase string `json:"phase,omitempty"`
 }
 
 // OnConflict strategy constants.
 const (
 	OnConflictAssignBack = "assign_back"
 	OnConflictAutoRebase = "auto_rebase"
+)
+
+// Merge queue verification mode constants.
+const (
+	VerificationModeAdvisory = "advisory"
+	VerificationModeStrict   = "strict"
+)
+
+// Repo contract enforcement tier constants.
+const (
+	RepoContractTierBasic      = "basic"
+	RepoContractTierStrong     = "strong"
+	RepoContractTierProduction = "production"
+)
+
+// Merge queue gate phase constants.
+const (
+	MergeQueueGatePhasePreMerge   = "pre-merge"
+	MergeQueueGatePhasePostSquash = "post-squash"
 )
 
 // IsPolecatIntegrationEnabled returns whether polecat integration branch
@@ -1320,6 +1440,37 @@ func (c *MergeQueueConfig) IsRunTestsEnabled() bool {
 	return *c.RunTests
 }
 
+// GetVerificationMode returns the configured verification mode.
+func (c *MergeQueueConfig) GetVerificationMode() string {
+	if c == nil || c.VerificationMode == "" {
+		return VerificationModeAdvisory
+	}
+	return c.VerificationMode
+}
+
+// IsStrictVerification returns true when strict merge-queue verification is enabled.
+func (c *MergeQueueConfig) IsStrictVerification() bool {
+	return c.GetVerificationMode() == VerificationModeStrict
+}
+
+// IsGatesParallelEnabled returns whether pre-merge gates should run concurrently.
+// Nil-safe, defaults to true.
+func (c *MergeQueueConfig) IsGatesParallelEnabled() bool {
+	if c == nil || c.GatesParallel == nil {
+		return true
+	}
+	return *c.GatesParallel
+}
+
+// IsAutoPushEnabled returns whether the refinery should push merged results automatically.
+// Nil-safe, defaults to true.
+func (c *MergeQueueConfig) IsAutoPushEnabled() bool {
+	if c == nil || c.AutoPush == nil {
+		return true
+	}
+	return *c.AutoPush
+}
+
 // IsDeleteMergedBranchesEnabled returns whether merged branches should be deleted.
 // Nil-safe, defaults to true.
 func (c *MergeQueueConfig) IsDeleteMergedBranchesEnabled() bool {
@@ -1347,20 +1498,48 @@ func (c *MergeQueueConfig) GetReviewDepth() string {
 	return c.ReviewDepth
 }
 
+// WorkflowName returns the configured GitHub workflow name.
+func (c *GitHubCIConfig) WorkflowName() string {
+	if c == nil || strings.TrimSpace(c.Workflow) == "" {
+		return "CI"
+	}
+	return strings.TrimSpace(c.Workflow)
+}
+
+// IsRequired returns whether GitHub CI assurance is mandatory.
+func (c *GitHubCIConfig) IsRequired() bool {
+	if c == nil || c.Required == nil {
+		return true
+	}
+	return *c.Required
+}
+
 // boolPtr returns a pointer to a bool value.
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// GetEnforcementTier returns the configured repo contract tier.
+// Empty values default to "strong".
+func (c *RepoContractConfig) GetEnforcementTier() string {
+	if c == nil || c.EnforcementTier == "" {
+		return RepoContractTierStrong
+	}
+	return c.EnforcementTier
 }
 
 // DefaultMergeQueueConfig returns a MergeQueueConfig with sensible defaults.
 func DefaultMergeQueueConfig() *MergeQueueConfig {
 	return &MergeQueueConfig{
 		Enabled:                          true,
+		VerificationMode:                 VerificationModeAdvisory,
 		IntegrationBranchPolecatEnabled:  boolPtr(true),
 		IntegrationBranchRefineryEnabled: boolPtr(true),
 		OnConflict:                       OnConflictAssignBack,
 		RunTests:                         boolPtr(true),
 		TestCommand:                      "",
+		GatesParallel:                    boolPtr(true),
+		AutoPush:                         boolPtr(true),
 		DeleteMergedBranches:             boolPtr(true),
 		RetryFlakyTests:                  1,
 		PollInterval:                     "30s",

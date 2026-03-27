@@ -1,0 +1,19 @@
+{
+  "channel": "bench",
+  "payload": {
+    "event_type": "bench.complete",
+    "iterations": "5",
+    "p50_create_ms": "4.98",
+    "p50_list_ms": "14.74",
+    "p50_query_ms": "3.28",
+    "p95_create_ms": "14.55",
+    "p95_list_ms": "19.72",
+    "p95_query_ms": "5.31",
+    "p99_create_ms": "14.55",
+    "p99_list_ms": "19.72",
+    "p99_query_ms": "5.31",
+    "total_duration_ms": "0"
+  },
+  "timestamp": "2026-03-27T09:11:53-04:00",
+  "type": "bench.complete"
+}
