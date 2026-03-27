@@ -252,6 +252,10 @@ func runHandoff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if townRoot, role, rig, agent, sessionID, workBead, source := currentContextSessionSummarySource("handoff"); townRoot != "" {
+		_ = recordContextSummary(townRoot, role, rig, agent, sessionID, workBead, source, handoffMessage, "handoff")
+	}
+
 	// If handing off a different session, we need to find its pane and respawn there.
 	// Remote sessions live on the town socket, so use townTmux for their operations.
 	if targetSession != currentSession {
@@ -380,6 +384,9 @@ func runHandoffAuto() error {
 	if message == "" {
 		message = collectHandoffState()
 	}
+	if townRoot, role, rig, agent, sessionID, workBead, source := currentContextSessionSummarySource("handoff_auto"); townRoot != "" {
+		_ = recordContextSummary(townRoot, role, rig, agent, sessionID, workBead, source, message, "handoff", "auto")
+	}
 
 	if handoffDryRun {
 		fmt.Printf("[auto-handoff] Would send mail: subject=%q\n", subject)
@@ -456,6 +463,9 @@ func runHandoffCycle() error {
 	message := handoffMessage
 	if message == "" {
 		message = collectHandoffState()
+	}
+	if townRoot, role, rig, agent, sessionID, workBead, source := currentContextSessionSummarySource("handoff_cycle"); townRoot != "" {
+		_ = recordContextSummary(townRoot, role, rig, agent, sessionID, workBead, source, message, "handoff", "cycle")
 	}
 
 	// Must be in tmux to respawn

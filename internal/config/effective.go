@@ -210,6 +210,9 @@ func mergeRigSettingsInto(dst, src *RigSettings) {
 	if src.WorkerAgents != nil {
 		dst.WorkerAgents = src.WorkerAgents
 	}
+	if src.Context != nil {
+		dst.Context = src.Context
+	}
 }
 
 func valueMergeQueue(settings *RigSettings) *MergeQueueConfig {

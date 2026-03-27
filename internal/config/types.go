@@ -112,6 +112,10 @@ type TownSettings struct {
 	// "main_branch_test", "handler").
 	// Example: ["doctor_dog", "compactor_dog"]
 	DisabledPatrols []string `json:"disabled_patrols,omitempty"`
+
+	// Context configures context budgeting, retrieval, scratchpad, and entropy policy.
+	// Default-on. Rig settings may override portions of this policy.
+	Context *ContextConfig `json:"context,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -122,6 +126,89 @@ func NewTownSettings() *TownSettings {
 		DefaultAgent: "claude",
 		Agents:       make(map[string]*RuntimeConfig),
 		RoleAgents:   make(map[string]string),
+		Context:      DefaultContextConfig(),
+	}
+}
+
+// ContextConfig controls the shared context stack.
+type ContextConfig struct {
+	Enabled bool `json:"enabled"`
+
+	// MaxTokens is the fallback context window when a runtime does not expose one.
+	MaxTokens int `json:"max_tokens,omitempty"`
+
+	// Budgets assign token percentages to each context layer.
+	Budgets *ContextBudgetConfig `json:"budgets,omitempty"`
+
+	// Thresholds define warn/soft/hard trigger points for usage and entropy.
+	Thresholds *ContextThresholdConfig `json:"thresholds,omitempty"`
+
+	// Recovery configures guided recovery behavior after thresholds trip.
+	Recovery *ContextRecoveryConfig `json:"recovery,omitempty"`
+
+	// RuntimeOverrides lets operators tweak per-runtime fidelity or window size.
+	RuntimeOverrides map[string]*RuntimeContextConfig `json:"runtime_overrides,omitempty"`
+}
+
+type ContextBudgetConfig struct {
+	InstructionsPct  float64 `json:"instructions_pct,omitempty"`
+	RetrievedPct     float64 `json:"retrieved_pct,omitempty"`
+	CarryForwardPct  float64 `json:"carry_forward_pct,omitempty"`
+	ScratchpadPct    float64 `json:"scratchpad_pct,omitempty"`
+	OutputReservePct float64 `json:"output_reserve_pct,omitempty"`
+	SafetySlackPct   float64 `json:"safety_slack_pct,omitempty"`
+}
+
+type ContextThresholdConfig struct {
+	WarnUsage   float64 `json:"warn_usage,omitempty"`
+	SoftUsage   float64 `json:"soft_usage,omitempty"`
+	HardUsage   float64 `json:"hard_usage,omitempty"`
+	WarnEntropy float64 `json:"warn_entropy,omitempty"`
+	SoftEntropy float64 `json:"soft_entropy,omitempty"`
+	HardEntropy float64 `json:"hard_entropy,omitempty"`
+}
+
+type ContextRecoveryConfig struct {
+	Enabled               bool `json:"enabled"`
+	AutonomousAutoRecover bool `json:"autonomous_auto_recover,omitempty"`
+	InteractiveWarnOnly   bool `json:"interactive_warn_only,omitempty"`
+}
+
+// RuntimeContextConfig describes the fidelity a runtime can provide to the shared context stack.
+type RuntimeContextConfig struct {
+	NativeContextUsage bool `json:"native_context_usage,omitempty"`
+	HookSummaries      bool `json:"hook_summaries,omitempty"`
+	Scratchpad         bool `json:"scratchpad,omitempty"`
+	EntropySignals     bool `json:"entropy_signals,omitempty"`
+	MaxContextTokens   int  `json:"max_context_tokens,omitempty"`
+}
+
+func DefaultContextConfig() *ContextConfig {
+	return &ContextConfig{
+		Enabled:   true,
+		MaxTokens: 200000,
+		Budgets: &ContextBudgetConfig{
+			InstructionsPct:  0.10,
+			RetrievedPct:     0.20,
+			CarryForwardPct:  0.30,
+			ScratchpadPct:    0.10,
+			OutputReservePct: 0.20,
+			SafetySlackPct:   0.10,
+		},
+		Thresholds: &ContextThresholdConfig{
+			WarnUsage:   0.75,
+			SoftUsage:   0.85,
+			HardUsage:   0.92,
+			WarnEntropy: 0.60,
+			SoftEntropy: 0.75,
+			HardEntropy: 0.90,
+		},
+		Recovery: &ContextRecoveryConfig{
+			Enabled:               true,
+			AutonomousAutoRecover: true,
+			InteractiveWarnOnly:   true,
+		},
+		RuntimeOverrides: map[string]*RuntimeContextConfig{},
 	}
 }
 
@@ -662,6 +749,9 @@ type RigSettings struct {
 	// Takes precedence over RoleAgents["crew"] but is overridden by explicit --agent flags.
 	// Example: {"denali": "codex", "glacier": "gemini"}
 	WorkerAgents map[string]string `json:"worker_agents,omitempty"`
+
+	// Context overrides the town-wide context management policy for this rig.
+	Context *ContextConfig `json:"context,omitempty"`
 }
 
 // RepoContractConfig defines the repo-local safety contract Gastown should enforce.
@@ -769,6 +859,9 @@ type RuntimeConfig struct {
 	// When set, the agent can run in ACP mode. If nil, ACP support is
 	// determined by matching the Command to a known preset with ACP config.
 	ACP *ACPConfig `json:"acp,omitempty"`
+
+	// Context describes context-management capabilities for this runtime.
+	Context *RuntimeContextConfig `json:"context,omitempty"`
 
 	// ExecWrapper is a command prefix inserted between environment variables
 	// and the agent binary in the startup command. Used for sandboxed execution.
@@ -933,6 +1026,10 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 		i := *rc.Instructions
 		rc.Instructions = &i
 	}
+	if rc.Context != nil {
+		c := *rc.Context
+		rc.Context = &c
+	}
 
 	if rc.Provider == "" {
 		rc.Provider = "claude"
@@ -1007,6 +1104,25 @@ func normalizeRuntimeConfig(rc *RuntimeConfig) *RuntimeConfig {
 
 	if rc.Instructions.File == "" {
 		rc.Instructions.File = defaultInstructionsFile(rc.Provider)
+	}
+
+	if rc.Context == nil {
+		rc.Context = &RuntimeContextConfig{}
+	}
+	if rc.Context.MaxContextTokens == 0 {
+		rc.Context.MaxContextTokens = defaultRuntimeMaxContextTokens(rc.Provider)
+	}
+	if !rc.Context.HookSummaries {
+		rc.Context.HookSummaries = defaultRuntimeHookSummaries(rc.Provider)
+	}
+	if !rc.Context.Scratchpad {
+		rc.Context.Scratchpad = defaultRuntimeScratchpad(rc.Provider)
+	}
+	if !rc.Context.NativeContextUsage {
+		rc.Context.NativeContextUsage = defaultRuntimeNativeUsage(rc.Provider)
+	}
+	if !rc.Context.EntropySignals {
+		rc.Context.EntropySignals = defaultRuntimeEntropySignals(rc.Provider)
 	}
 
 	return rc
@@ -1109,6 +1225,41 @@ func defaultHooksInformational(provider string) bool {
 		return preset.HooksInformational
 	}
 	return false
+}
+
+func defaultRuntimeNativeUsage(provider string) bool {
+	if preset := GetAgentPresetByName(provider); preset != nil && preset.Context != nil {
+		return preset.Context.NativeContextUsage
+	}
+	return false
+}
+
+func defaultRuntimeHookSummaries(provider string) bool {
+	if preset := GetAgentPresetByName(provider); preset != nil && preset.Context != nil {
+		return preset.Context.HookSummaries
+	}
+	return false
+}
+
+func defaultRuntimeScratchpad(provider string) bool {
+	if preset := GetAgentPresetByName(provider); preset != nil && preset.Context != nil {
+		return preset.Context.Scratchpad
+	}
+	return false
+}
+
+func defaultRuntimeEntropySignals(provider string) bool {
+	if preset := GetAgentPresetByName(provider); preset != nil && preset.Context != nil {
+		return preset.Context.EntropySignals
+	}
+	return false
+}
+
+func defaultRuntimeMaxContextTokens(provider string) int {
+	if preset := GetAgentPresetByName(provider); preset != nil && preset.Context != nil {
+		return preset.Context.MaxContextTokens
+	}
+	return 0
 }
 
 func defaultProcessNames(provider, command string) []string {

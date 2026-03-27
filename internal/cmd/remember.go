@@ -103,6 +103,11 @@ func runRemember(cmd *cobra.Command, args []string) error {
 	if err := bdKvSet(fullKey, content); err != nil {
 		return fmt.Errorf("storing memory: %w", err)
 	}
+	if townRoot := detectTownRootFromCwd(); townRoot != "" {
+		if store, err := openContextStore(townRoot); err == nil {
+			_ = upsertMemoryContextDoc(store, memType, key, content)
+		}
+	}
 
 	displayKey := key
 	if memType != "general" {

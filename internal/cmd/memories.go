@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/steveyegge/gastown/internal/ctxstack"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -41,11 +42,6 @@ Examples:
 }
 
 func runMemories(cmd *cobra.Command, args []string) error {
-	kvs, err := bdKvListJSON()
-	if err != nil {
-		return fmt.Errorf("listing memories: %w", err)
-	}
-
 	var search string
 	if len(args) > 0 {
 		search = strings.ToLower(args[0])
@@ -56,6 +52,17 @@ func runMemories(cmd *cobra.Command, args []string) error {
 		if _, ok := validMemoryTypes[typeFilter]; !ok {
 			return fmt.Errorf("invalid memory type %q — valid types: feedback, project, user, reference, general", typeFilter)
 		}
+	}
+
+	if search != "" {
+		if err := runRankedMemories(search, typeFilter); err == nil {
+			return nil
+		}
+	}
+
+	kvs, err := bdKvListJSON()
+	if err != nil {
+		return fmt.Errorf("listing memories: %w", err)
 	}
 
 	// Filter for memory.* keys and optional search/type
@@ -128,6 +135,72 @@ func runMemories(cmd *cobra.Command, args []string) error {
 		fmt.Printf("    %s\n\n", m.value)
 	}
 
+	return nil
+}
+
+func runRankedMemories(search, typeFilter string) error {
+	townRoot := detectTownRootFromCwd()
+	if townRoot == "" {
+		return fmt.Errorf("town root not found")
+	}
+	store, err := openContextStore(townRoot)
+	if err != nil {
+		return err
+	}
+	if err := syncContextMemories(store); err != nil {
+		return err
+	}
+	results, err := store.SearchRetrieval(ctxstack.SearchOptions{
+		Query: search,
+		Limit: 12,
+	})
+	if err != nil {
+		return err
+	}
+
+	type hit struct {
+		memType string
+		key     string
+		value   string
+		source  string
+	}
+	var hits []hit
+	for _, result := range results {
+		memType, key := "summary", result.DocID
+		if result.Source == "memory" {
+			parts := strings.SplitN(strings.TrimPrefix(result.DocID, "memory:"), ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			memType, key = parts[0], parts[1]
+			if typeFilter != "" && memType != typeFilter {
+				continue
+			}
+		}
+		hits = append(hits, hit{
+			memType: memType,
+			key:     key,
+			value:   trimContextText(strings.TrimSpace(result.Text), 320),
+			source:  result.Source,
+		})
+	}
+	if len(hits) == 0 {
+		return fmt.Errorf("no ranked hits")
+	}
+
+	fmt.Printf("%s matching %q (%d):\n\n", style.Bold.Render("Ranked Context"), search, len(hits))
+	lastType := ""
+	for _, hit := range hits {
+		if hit.memType != lastType {
+			if lastType != "" {
+				fmt.Println()
+			}
+			fmt.Printf("  %s\n", style.Dim.Render("["+hit.memType+"]"))
+			lastType = hit.memType
+		}
+		fmt.Printf("  %s\n", style.Bold.Render(hit.key))
+		fmt.Printf("    %s\n\n", hit.value)
+	}
 	return nil
 }
 

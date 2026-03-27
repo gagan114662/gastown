@@ -885,7 +885,7 @@ func DefaultBase() *HooksConfig {
 				Hooks: []Hook{
 					{
 						Type:    "command",
-						Command: fmt.Sprintf("%s && gt mail check --inject", pathSetup),
+						Command: fmt.Sprintf("%s && gt entropy --guard --action turn-boundary && gt mail check --inject", pathSetup),
 					},
 				},
 			},

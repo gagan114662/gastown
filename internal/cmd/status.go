@@ -135,6 +135,14 @@ type AgentRuntime struct {
 	FirstSubject      string `json:"first_subject,omitempty"`      // Subject of first unread message
 	AgentAlias        string `json:"agent_alias,omitempty"`        // Configured agent name (e.g., "opus-46", "pi")
 	AgentInfo         string `json:"agent_info,omitempty"`         // Runtime summary (e.g., "claude/opus", "pi/kimi-k2p5")
+	ContextUsage            float64 `json:"context_usage,omitempty"`
+	EntropyScore            float64 `json:"entropy_score,omitempty"`
+	EntropyBand             string  `json:"entropy_band,omitempty"`
+	LastProgressAt          string  `json:"last_progress_at,omitempty"`
+	NativeContextUsage      bool    `json:"native_context_usage,omitempty"`
+	HookSummarySupport      bool    `json:"hook_summary_support,omitempty"`
+	ScratchpadSupport       bool    `json:"scratchpad_support,omitempty"`
+	EntropySignalSupport    bool    `json:"entropy_signal_support,omitempty"`
 }
 
 // RigStatus represents status of a single rig.
@@ -1615,6 +1623,7 @@ func discoverGlobalAgents(townRoot string, allSessions map[string]bool, allAgent
 			if !skipMail {
 				populateMailInfo(&agent, mailRouter)
 			}
+			populateContextRuntimeStatus(&agent, townRoot)
 
 			agents[idx] = agent
 		}(i, def)
@@ -1793,6 +1802,7 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 			if !skipMail {
 				populateMailInfo(&agent, mailRouter)
 			}
+			populateContextRuntimeStatus(&agent, townRoot)
 
 			agents[idx] = agent
 		}(i, def)
@@ -1800,6 +1810,48 @@ func discoverRigAgents(allSessions map[string]bool, r *rig.Rig, crews []string, 
 
 	wg.Wait()
 	return agents
+}
+
+func populateContextRuntimeStatus(agent *AgentRuntime, townRoot string) {
+	if agent == nil || agent.Session == "" || townRoot == "" {
+		return
+	}
+	t := tmux.NewTmux()
+	sessionID, _ := t.GetEnvironment(agent.Session, "GT_SESSION_ID")
+	if sessionID == "" {
+		return
+	}
+	store, err := openContextStore(townRoot)
+	if err != nil {
+		return
+	}
+	if sample, err := store.LatestEntropySample(sessionID); err == nil && sample != nil {
+		agent.ContextUsage = sample.ContextUsage
+		agent.EntropyScore = sample.Score
+		agent.EntropyBand = sample.Band
+	}
+	if ts, err := store.LatestActivityAt(sessionID); err == nil && !ts.IsZero() {
+		agent.LastProgressAt = ts.Format(time.RFC3339)
+	}
+	runtimeName, _ := t.GetEnvironment(agent.Session, "GT_AGENT")
+	rigName := ""
+	if agent.Role != "coordinator" && agent.Role != "health-check" {
+		if parts := strings.Split(agent.Address, "/"); len(parts) > 1 {
+			rigName = parts[0]
+		}
+	}
+	role := agent.Role
+	switch role {
+	case "coordinator":
+		role = constants.RoleMayor
+	case "health-check":
+		role = constants.RoleDeacon
+	}
+	caps := resolveRuntimeContextCapabilitiesFor(runtimeName, townRoot, rigName, role)
+	agent.NativeContextUsage = caps.NativeContextUsage
+	agent.HookSummarySupport = caps.HookSummaries
+	agent.ScratchpadSupport = caps.Scratchpad
+	agent.EntropySignalSupport = caps.EntropySignals
 }
 
 // getMQSummary queries beads for merge-request issues and returns a summary.
