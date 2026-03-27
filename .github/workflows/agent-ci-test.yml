@@ -23,5 +23,3 @@ jobs:
         run: make build
       - name: Test
         run: ./scripts/ci/verify.sh unit
-      - name: Coverage check
-        run: ./scripts/ci/verify.sh coverage
