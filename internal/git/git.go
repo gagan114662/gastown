@@ -1004,7 +1004,7 @@ func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 // the remote. In a fork workflow the push URL (fork) differs from the fetch URL
 // (upstream); ls-remote on the remote name resolves to the fetch URL and will
 // not find branches that were pushed to the fork. This method queries the push
-// URL directly when it differs from the fetch URL, matching the behaviour of
+// URL directly when it differs from the fetch URL, matching the behavior of
 // ListPushRemoteRefs.
 func (g *Git) RemoteBranchExistsOnPushRemote(remote, branch string) (bool, error) {
 	fetchURL, fetchErr := g.RemoteURL(remote)
