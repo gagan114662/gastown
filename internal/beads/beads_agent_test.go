@@ -83,8 +83,7 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			"set \"cmd=\"\r\n" +
 			"set \"id=\"\r\n" +
 			"set \"sql=\"\r\n" +
-			"set \"statearg=\"\r\n" +
-			"set \"stateextra=\"\r\n" +
+			"set \"rawargs=%*\"\r\n" +
 			":findcmd\r\n" +
 			"if \"%~1\"==\"\" goto havecmd\r\n" +
 			"set \"arg=%~1\"\r\n" +
@@ -95,20 +94,18 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			"set \"cmd=%~1\"\r\n" +
 			"set \"id=%~2\"\r\n" +
 			"set \"sql=%~2\"\r\n" +
-			"set \"statearg=%~3\"\r\n" +
-			"set \"stateextra=%~4\"\r\n" +
 			":havecmd\r\n" +
 			"if /I \"%cmd%\"==\"version\" (\r\n" +
 			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale version\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
-			"if /I \"%cmd%\"==\"set-state\" (\r\n" +
-			"  if not \"!stateextra!\"==\"\" if \"!statearg!\"==\"!statearg:=!\" set \"statearg=!statearg!=!stateextra!\"\r\n" +
-			"  >> \"%MOCK_BD_LOG%\" echo(set-state !id! !statearg!\r\n" +
-			"  exit /b 0\r\n" +
-			")\r\n" +
 			"if /I \"%cmd%\"==\"sql\" (\r\n" +
 			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale sql %sql%\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			"if /I \"%cmd%\"==\"set-state\" (\r\n" +
+			"  set \"statecall=!rawargs:*set-state =!\"\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(set-state !statecall!\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
 			"if /I \"%cmd%\"==\"update\" (\r\n" +
@@ -215,7 +212,7 @@ func TestGetAgentBead_FallsBackToDescriptionAgentState(t *testing.T) {
 	}
 }
 
-func TestUpdateAgentState_UsesSQLAndDoesNotCallMissingBDSubcommand(t *testing.T) {
+func TestUpdateAgentState_UsesSetStateAndDoesNotCallDeprecatedSubcommands(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".beads"), 0755); err != nil {
 		t.Fatalf("mkdir .beads: %v", err)

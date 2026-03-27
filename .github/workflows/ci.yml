@@ -141,8 +141,24 @@ jobs:
         run: |
           curl -L https://github.com/dolthub/dolt/releases/latest/download/install.sh | sudo bash
 
+      - name: Log in to Docker Hub
+        if: ${{ vars.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Pre-pull Dolt Docker image
-        run: docker pull dolthub/dolt-sql-server:1.83.0
+        run: |
+          for attempt in 1 2 3; do
+            if docker pull dolthub/dolt-sql-server:1.83.0; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          exit 1
 
       - name: Cache beads (bd)
         id: cache-beads-int
