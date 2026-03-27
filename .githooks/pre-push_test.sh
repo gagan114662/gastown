@@ -93,7 +93,7 @@ local_sha=$(get_sha HEAD)
 assert_pass "Normal push allowed" run_hook "refs/heads/$DEFAULT_BRANCH" "$local_sha" "refs/heads/$DEFAULT_BRANCH" "$remote_sha"
 cleanup
 
-# Test 2: Push to polecat/* branch
+# Test 2: Push to polecat/* branch (GT_SKIP_CI=1 to bypass CI gate in unit tests)
 echo "Test 2: Push to polecat/* branch"
 setup_repos
 cd "$TMPDIR/local"
@@ -101,7 +101,33 @@ git checkout -b polecat/worker1 >/dev/null 2>&1
 echo "polecat work" >> file.txt
 git add file.txt && git commit -m "polecat work" >/dev/null 2>&1
 local_sha=$(get_sha HEAD)
-assert_pass "Polecat push allowed" run_hook "refs/heads/polecat/worker1" "$local_sha" "refs/heads/polecat/worker1" "0000000000000000000000000000000000000000"
+GT_SKIP_CI=1 assert_pass "Polecat push allowed (branch policy)" run_hook "refs/heads/polecat/worker1" "$local_sha" "refs/heads/polecat/worker1" "0000000000000000000000000000000000000000"
+cleanup
+
+# Test 2b: Push to polecat/* branch — CI gate blocked (no script present)
+echo "Test 2b: CI gate blocks polecat push when script missing"
+setup_repos
+cd "$TMPDIR/local"
+git checkout -b polecat/worker1 >/dev/null 2>&1
+echo "polecat work" >> file.txt
+git add file.txt && git commit -m "polecat work" >/dev/null 2>&1
+local_sha=$(get_sha HEAD)
+assert_block "Polecat push blocked when CI gate missing" run_hook "refs/heads/polecat/worker1" "$local_sha" "refs/heads/polecat/worker1" "0000000000000000000000000000000000000000"
+cleanup
+
+# Test 2c: Push to polecat/* branch — CI gate passes (mock script present)
+echo "Test 2c: CI gate allows polecat push when script passes"
+setup_repos
+cd "$TMPDIR/local"
+mkdir -p scripts/ci
+echo '#!/bin/bash' > scripts/ci/agent-ci-gate.sh
+echo 'exit 0' >> scripts/ci/agent-ci-gate.sh
+chmod +x scripts/ci/agent-ci-gate.sh
+git checkout -b polecat/worker1 >/dev/null 2>&1
+echo "polecat work" >> file.txt
+git add file.txt && git commit -m "polecat work" >/dev/null 2>&1
+local_sha=$(get_sha HEAD)
+assert_pass "Polecat push allowed when CI gate passes" run_hook "refs/heads/polecat/worker1" "$local_sha" "refs/heads/polecat/worker1" "0000000000000000000000000000000000000000"
 cleanup
 
 # Test 3: Push to integration/* branch
