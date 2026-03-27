@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/scheduler/capacity"
 	"github.com/steveyegge/gastown/internal/testutil"
@@ -31,23 +30,21 @@ func cleanSchedulerTestEnv(tmpHome string) []string {
 	return env
 }
 
-func schedulerBDEnv(dir string) []string {
-	beadsDir := beads.ResolveBeadsDir(dir)
+func schedulerBDEnv() []string {
 	env := testutil.CleanGTEnv()
 	env = filterEnvKey(env, "BEADS_DIR")
 	env = filterEnvKey(env, "BEADS_DB")
 	env = filterEnvKey(env, "BEADS_DOLT_SERVER_DATABASE")
-	env = append(env, "BEADS_DIR="+beadsDir)
-	if dbEnv := beads.DatabaseEnv(beadsDir); dbEnv != "" {
-		env = append(env, dbEnv)
-	}
 	return env
 }
 
 func newSchedulerBDCommand(dir string, args ...string) *exec.Cmd {
 	cmd := exec.Command("bd", args...)
 	cmd.Dir = dir
-	cmd.Env = schedulerBDEnv(dir)
+	// Scheduler integration queries rely on cwd/.beads routing and redirects.
+	// Pinning BEADS_DIR here bypasses that routing and makes HQ convoy lookups
+	// hit the wrong database. Strip inherited BEADS_* vars instead.
+	cmd.Env = schedulerBDEnv()
 	return cmd
 }
 
@@ -283,4 +280,20 @@ func slingToScheduler(t *testing.T, gtBinary, dir string, env []string, beadID, 
 	args := []string{"sling", beadID, rig, "--hook-raw-bead"}
 	args = append(args, extraFlags...)
 	return runGTCmdOutput(t, gtBinary, dir, env, args...)
+}
+
+func TestSchedulerBDEnv_StripsPinnedBeadsRouting(t *testing.T) {
+	t.Setenv("BEADS_DIR", "/tmp/should-not-leak")
+	t.Setenv("BEADS_DB", "should-not-leak")
+	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "should-not-leak")
+
+	env := schedulerBDEnv()
+	for _, key := range []string{"BEADS_DIR", "BEADS_DB", "BEADS_DOLT_SERVER_DATABASE"} {
+		prefix := key + "="
+		for _, entry := range env {
+			if len(entry) >= len(prefix) && entry[:len(prefix)] == prefix {
+				t.Fatalf("schedulerBDEnv should strip %s, got %q", key, entry)
+			}
+		}
+	}
 }
