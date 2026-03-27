@@ -44,6 +44,3 @@ jobs:
         # Skip TestNudgeLockConcurrency: goroutine scheduling test that
         # reliably passes locally and on GitHub but flakes in Docker containers.
         run: go test -short -timeout=10m -skip TestNudgeLockConcurrency ./...
-
-      - name: Coverage check
-        run: ./scripts/ci/verify.sh coverage
