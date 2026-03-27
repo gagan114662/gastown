@@ -84,6 +84,7 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			"set \"id=\"\r\n" +
 			"set \"sql=\"\r\n" +
 			"set \"statearg=\"\r\n" +
+			"set \"stateextra=\"\r\n" +
 			":findcmd\r\n" +
 			"if \"%~1\"==\"\" goto havecmd\r\n" +
 			"set \"arg=%~1\"\r\n" +
@@ -95,13 +96,15 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			"set \"id=%~2\"\r\n" +
 			"set \"sql=%~2\"\r\n" +
 			"set \"statearg=%~3\"\r\n" +
+			"set \"stateextra=%~4\"\r\n" +
 			":havecmd\r\n" +
 			"if /I \"%cmd%\"==\"version\" (\r\n" +
 			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale version\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
 			"if /I \"%cmd%\"==\"set-state\" (\r\n" +
-			"  >> \"%MOCK_BD_LOG%\" echo(set-state %id% %statearg%\r\n" +
+			"  if not \"!stateextra!\"==\"\" if \"!statearg!\"==\"!statearg:=!\" set \"statearg=!statearg!=!stateextra!\"\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(set-state !id! !statearg!\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
 			"if /I \"%cmd%\"==\"sql\" (\r\n" +
