@@ -722,7 +722,10 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		// Verify the branch actually exists on remote (GH #1348).
 		// Push can return exit 0 without actually pushing (e.g., stale refs,
 		// worktree/bare-repo state mismatch). Verify before creating MR bead.
-		if exists, verifyErr := g.RemoteBranchExists("origin", branch); verifyErr != nil {
+		// Use RemoteBranchExistsOnPushRemote so fork workflows (where origin's
+		// push URL differs from its fetch URL) are checked against the fork, not
+		// the upstream (gt-74qm).
+		if exists, verifyErr := g.RemoteBranchExistsOnPushRemote("origin", branch); verifyErr != nil {
 			style.PrintWarning("could not verify push: %v (proceeding optimistically)", verifyErr)
 		} else if !exists {
 			// Push "succeeded" but branch not on remote — try bare repo verification
@@ -731,7 +734,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			bareRepoPath := filepath.Join(rigPath, ".repo.git")
 			if _, statErr := os.Stat(bareRepoPath); statErr == nil {
 				bareGit := git.NewGitWithDir(bareRepoPath, "")
-				exists, verifyErr = bareGit.RemoteBranchExists("origin", branch)
+				exists, verifyErr = bareGit.RemoteBranchExistsOnPushRemote("origin", branch)
 			}
 			if verifyErr != nil || !exists {
 				pushFailed = true

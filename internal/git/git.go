@@ -1000,6 +1000,27 @@ func (g *Git) RemoteBranchExists(remote, branch string) (bool, error) {
 	return out != "", nil
 }
 
+// RemoteBranchExistsOnPushRemote checks if a branch exists on the push URL of
+// the remote. In a fork workflow the push URL (fork) differs from the fetch URL
+// (upstream); ls-remote on the remote name resolves to the fetch URL and will
+// not find branches that were pushed to the fork. This method queries the push
+// URL directly when it differs from the fetch URL, matching the behaviour of
+// ListPushRemoteRefs.
+func (g *Git) RemoteBranchExistsOnPushRemote(remote, branch string) (bool, error) {
+	fetchURL, fetchErr := g.RemoteURL(remote)
+	pushURL, pushErr := g.GetPushURL(remote)
+	if fetchErr != nil || pushErr != nil || pushURL == fetchURL {
+		// No custom push URL — fall back to the standard check.
+		return g.RemoteBranchExists(remote, branch)
+	}
+	// Query the push URL directly so we check where the branch was actually pushed.
+	out, err := g.run("ls-remote", "--heads", pushURL, branch)
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
+
 // RemoteTrackingBranchExists checks if a remote-tracking branch ref exists locally
 // (e.g. refs/remotes/origin/main), without hitting the network.
 func (g *Git) RemoteTrackingBranchExists(remote, branch string) (bool, error) {
