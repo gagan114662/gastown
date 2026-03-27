@@ -116,6 +116,12 @@ type TownSettings struct {
 	// Context configures context budgeting, retrieval, scratchpad, and entropy policy.
 	// Default-on. Rig settings may override portions of this policy.
 	Context *ContextConfig `json:"context,omitempty"`
+
+	// Memory configures governed memory injection and audit thresholds.
+	Memory *MemoryConfig `json:"memory,omitempty"`
+
+	// Policy configures per-role execution governance and entitlements.
+	Policy *PolicyConfig `json:"policy,omitempty"`
 }
 
 // NewTownSettings creates a new TownSettings with defaults.
@@ -127,6 +133,31 @@ func NewTownSettings() *TownSettings {
 		Agents:       make(map[string]*RuntimeConfig),
 		RoleAgents:   make(map[string]string),
 		Context:      DefaultContextConfig(),
+		Memory:       DefaultMemoryConfig(),
+		Policy:       &PolicyConfig{RolePolicies: map[string]*RolePolicyConfig{}},
+	}
+}
+
+// MemoryConfig controls which persisted memories are injected into context and when they are audited.
+type MemoryConfig struct {
+	// MinConfidence is the minimum confidence required for gt prime injection.
+	MinConfidence float64 `json:"min_confidence,omitempty"`
+
+	// AllowedStatuses are the memory statuses eligible for gt prime injection.
+	AllowedStatuses []string `json:"allowed_statuses,omitempty"`
+
+	// StaleAfterDays flags memories older than this threshold during audit.
+	StaleAfterDays int `json:"stale_after_days,omitempty"`
+}
+
+// DefaultMemoryConfig returns the default governed-memory policy.
+func DefaultMemoryConfig() *MemoryConfig {
+	return &MemoryConfig{
+		MinConfidence: 0.6,
+		AllowedStatuses: []string{
+			"active",
+		},
+		StaleAfterDays: 30,
 	}
 }
 
@@ -752,6 +783,28 @@ type RigSettings struct {
 
 	// Context overrides the town-wide context management policy for this rig.
 	Context *ContextConfig `json:"context,omitempty"`
+
+	// Memory overrides the town-wide governed memory policy for this rig.
+	Memory *MemoryConfig `json:"memory,omitempty"`
+
+	// Policy defines per-role governance and entitlements.
+	Policy *PolicyConfig `json:"policy,omitempty"`
+}
+
+// PolicyConfig defines role-based execution governance.
+type PolicyConfig struct {
+	RolePolicies map[string]*RolePolicyConfig `json:"role_policies,omitempty"`
+}
+
+// RolePolicyConfig constrains what a role is allowed to execute or mutate.
+type RolePolicyConfig struct {
+	Commands       []string `json:"commands,omitempty"`
+	GTSubcommands  []string `json:"gt_subcommands,omitempty"`
+	BDSubcommands  []string `json:"bd_subcommands,omitempty"`
+	WriteRoots     []string `json:"write_roots,omitempty"`
+	BranchPatterns []string `json:"branch_patterns,omitempty"`
+	Network        string   `json:"network,omitempty"`
+	Push           *bool    `json:"push,omitempty"`
 }
 
 // RepoContractConfig defines the repo-local safety contract Gastown should enforce.

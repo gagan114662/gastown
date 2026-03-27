@@ -55,7 +55,14 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading wasteland config: %w", err)
 	}
+	if err := requireWastelandTier(townRoot, wlCfg, wasteland.TierRegistered, "submit completions"); err != nil {
+		return err
+	}
 	rigHandle := wlCfg.RigHandle
+	assessment, err := wasteland.AnalyzeEvidence(wlDoneEvidence)
+	if err != nil {
+		return err
+	}
 
 	completionID := generateCompletionID(wantedID, rigHandle)
 
@@ -64,7 +71,7 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 		if wlCfg.LocalDir == "" {
 			return fmt.Errorf("database %q not found\nJoin a wasteland first with: gt wl join <org/db>", doltserver.WLCommonsDB)
 		}
-		if err := submitDoneInLocalClone(wlCfg.LocalDir, wantedID, rigHandle, wlDoneEvidence, completionID); err != nil {
+		if err := submitDoneInLocalClone(wlCfg.LocalDir, wantedID, rigHandle, wlDoneEvidence, completionID, assessment); err != nil {
 			return err
 		}
 	} else {
@@ -78,6 +85,8 @@ func runWlDone(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Completion ID: %s\n", completionID)
 	fmt.Printf("  Completed by: %s\n", rigHandle)
 	fmt.Printf("  Evidence: %s\n", wlDoneEvidence)
+	fmt.Printf("  Evidence type: %s\n", assessment.Type)
+	fmt.Printf("  Validation: %s\n", assessment.Status)
 	fmt.Printf("  Status: in_review\n")
 
 	return nil
@@ -105,17 +114,25 @@ func submitDone(store doltserver.WLCommonsStore, wantedID, rigHandle, evidence, 
 	return nil
 }
 
-func submitDoneInLocalClone(localDir, wantedID, rigHandle, evidence, completionID string) error {
+func submitDoneInLocalClone(localDir, wantedID, rigHandle, evidence, completionID string, assessment wasteland.EvidenceAssessment) error {
+	verifiedBy := "NULL"
+	verifiedAt := "NULL"
+	if assessment.Status == wasteland.ValidationVerified {
+		verifiedBy = "'system:auto'"
+		verifiedAt = "NOW()"
+	}
+	snapshotField := encodeJSONSQL(buildCompletionSnapshot(localDir, rigHandle, "in_review", assessment.Status, "", nil))
 	script := fmt.Sprintf(`UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
   WHERE id='%s' AND status='claimed' AND claimed_by='%s';
-INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
-  SELECT '%s', '%s', '%s', '%s', NOW()
+INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, evidence_type, validation_status, verified_by, verified_at, status_snapshot, completed_at)
+  SELECT '%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, NOW()
   FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s'
   AND NOT EXISTS (SELECT 1 FROM completions WHERE wanted_id='%s');
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl done: %s');`,
 		doltserver.EscapeSQL(evidence), doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(rigHandle),
 		doltserver.EscapeSQL(completionID), doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(rigHandle), doltserver.EscapeSQL(evidence),
+		doltserver.EscapeSQL(string(assessment.Type)), doltserver.EscapeSQL(string(assessment.Status)), verifiedBy, verifiedAt, snapshotField,
 		doltserver.EscapeSQL(wantedID), doltserver.EscapeSQL(rigHandle), doltserver.EscapeSQL(wantedID),
 		doltserver.EscapeSQL(wantedID))
 

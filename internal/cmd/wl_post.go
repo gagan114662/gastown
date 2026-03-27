@@ -12,13 +12,17 @@ import (
 )
 
 var (
-	wlPostTitle       string
-	wlPostDescription string
-	wlPostProject     string
-	wlPostType        string
-	wlPostPriority    int
-	wlPostEffort      string
-	wlPostTags        string
+	wlPostTitle           string
+	wlPostDescription     string
+	wlPostProject         string
+	wlPostType            string
+	wlPostPriority        int
+	wlPostEffort          string
+	wlPostTags            string
+	wlPostTargetRepo      string
+	wlPostDeliverable     string
+	wlPostTargetBranch    string
+	wlPostAcceptanceNotes []string
 )
 
 var wlPostCmd = &cobra.Command{
@@ -47,6 +51,10 @@ func init() {
 	wlPostCmd.Flags().IntVar(&wlPostPriority, "priority", 2, "Priority: 0=critical, 1=high, 2=medium, 3=low, 4=backlog")
 	wlPostCmd.Flags().StringVar(&wlPostEffort, "effort", "medium", "Effort level: trivial, small, medium, large, epic")
 	wlPostCmd.Flags().StringVar(&wlPostTags, "tags", "", "Comma-separated tags (e.g., 'go,auth,federation')")
+	wlPostCmd.Flags().StringVar(&wlPostTargetRepo, "target-repo", "", "Target repository for the deliverable")
+	wlPostCmd.Flags().StringVar(&wlPostDeliverable, "deliverable", "", "Deliverable type (pr, commit, design, docs, branch)")
+	wlPostCmd.Flags().StringVar(&wlPostTargetBranch, "target-branch", "", "Expected destination branch")
+	wlPostCmd.Flags().StringArrayVar(&wlPostAcceptanceNotes, "acceptance-note", nil, "Acceptance note (repeatable)")
 
 	_ = wlPostCmd.MarkFlagRequired("title")
 
@@ -91,6 +99,15 @@ func runWlPost(cmd *cobra.Command, args []string) error {
 		PostedBy:    wlCfg.RigHandle,
 		EffortLevel: wlPostEffort,
 	}
+	if wlPostTargetRepo != "" || wlPostDeliverable != "" || wlPostTargetBranch != "" || len(wlPostAcceptanceNotes) > 0 {
+		item.WorkSpec = &doltserver.WantedWorkSpec{
+			Version:         1,
+			TargetRepo:      wlPostTargetRepo,
+			Deliverable:     wlPostDeliverable,
+			TargetBranch:    wlPostTargetBranch,
+			AcceptanceNotes: append([]string(nil), wlPostAcceptanceNotes...),
+		}
+	}
 
 	if err := postWanted(store, item); err != nil {
 		return err
@@ -108,6 +125,20 @@ func runWlPost(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Effort:   %s\n", item.EffortLevel)
 	if len(item.Tags) > 0 {
 		fmt.Printf("  Tags:     %s\n", strings.Join(item.Tags, ", "))
+	}
+	if item.WorkSpec != nil {
+		if item.WorkSpec.TargetRepo != "" {
+			fmt.Printf("  Target repo: %s\n", item.WorkSpec.TargetRepo)
+		}
+		if item.WorkSpec.Deliverable != "" {
+			fmt.Printf("  Deliverable: %s\n", item.WorkSpec.Deliverable)
+		}
+		if item.WorkSpec.TargetBranch != "" {
+			fmt.Printf("  Target branch: %s\n", item.WorkSpec.TargetBranch)
+		}
+		if len(item.WorkSpec.AcceptanceNotes) > 0 {
+			fmt.Printf("  Acceptance: %s\n", strings.Join(item.WorkSpec.AcceptanceNotes, "; "))
+		}
 	}
 	fmt.Printf("  Posted by: %s\n", item.PostedBy)
 

@@ -186,19 +186,34 @@ func parsePluginMD(content []byte, pluginDir string, location Location, rigName 
 	}
 
 	plugin := &Plugin{
-		Name:         fm.Name,
-		Description:  fm.Description,
-		Version:      fm.Version,
-		Location:     location,
-		Path:         pluginDir,
-		RigName:      rigName,
-		Gate:         fm.Gate,
-		Tracking:     fm.Tracking,
-		Execution:    fm.Execution,
-		Instructions: body,
+		Name:              fm.Name,
+		Description:       fm.Description,
+		Version:           fm.Version,
+		APIVersion:        strings.TrimSpace(fm.APIVersion),
+		MinGastownVersion: strings.TrimSpace(fm.MinGastownVersion),
+		Permissions:       append([]string(nil), fm.Permissions...),
+		Location:          location,
+		Path:              pluginDir,
+		RigName:           rigName,
+		Gate:              fm.Gate,
+		Tracking:          fm.Tracking,
+		Execution:         fm.Execution,
+		Instructions:      body,
+	}
+	if plugin.APIVersion == "" {
+		plugin.APIVersion = "v1"
 	}
 
 	return plugin, nil
+}
+
+// LoadPluginDir loads a single plugin directory as a town-level plugin.
+func LoadPluginDir(pluginDir string) (*Plugin, error) {
+	content, err := os.ReadFile(filepath.Join(pluginDir, "plugin.md")) //nolint:gosec // G304: plugin dir is caller-controlled
+	if err != nil {
+		return nil, err
+	}
+	return parsePluginMD(content, pluginDir, LocationTown, "")
 }
 
 // GetPlugin returns a specific plugin by name.

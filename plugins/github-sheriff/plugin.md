@@ -2,6 +2,9 @@
 name = "github-sheriff"
 description = "Monitor GitHub CI checks on open PRs and the default branch, and create beads for failures"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["github:read", "beads:write", "beads:read"]
 
 [gate]
 type = "cooldown"

@@ -43,80 +43,47 @@ graph TB
     style Rig2 fill:#fff4e1,color:#000000
 ```
 
-## Core Concepts
+## Start Here
 
-### The Mayor 🎩
+If you only learn three things first, learn these:
 
-Your primary AI coordinator. The Mayor is a Claude Code instance with full context about your workspace, projects, and agents. **Start here** - just tell the Mayor what you want to accomplish.
+- **Mayor**: your primary coordinator session. Tell the Mayor what you want to build.
+- **Rig**: one project container around a repo plus its agents, settings, and control plane.
+- **Polecat**: a worker agent with persistent identity and ephemeral sessions.
 
-### Town 🏘️
+Most users can get productive without learning the rest of the glossary up front.
 
-Your workspace directory (e.g., `~/gt/`). Contains all projects, agents, and configuration.
+## Control Plane
 
-### Rigs 🏗️
+Gas Town's control plane is the part that makes multiple agents reliable instead
+of chaotic:
 
-Project containers. Each rig wraps a git repository and manages its associated agents.
+- **Beads**: the git-backed work ledger that stores issues, hooks, and agent state.
+- **Governed memory**: structured cross-session memory with confidence, status, and audit support.
+- **Convoys**: bundles of related work items that can be dispatched and tracked together.
+- **Witness / Deacon / Dogs**: the health loop. Witness manages one rig, Deacon supervises the town, Dogs handle maintenance/investigation work.
+- **Refinery**: the per-rig merge queue that verifies and lands work in a Bors-style flow.
+- **Policy**: role-level governance for what each agent can execute, mutate, and push.
 
-### Crew Members 👤
+If you are evaluating the platform angle, this is the core of the "Kubernetes
+for agents" story: scheduling, health checks, merge gates, memory, and policy
+around many independent workers.
 
-Your personal workspace within a rig. Where you do hands-on work.
+## Extensions & Federation
 
-### Polecats 🦨
+These are the platform contracts that let Gas Town grow beyond one runtime or
+one workspace:
 
-Worker agents with persistent identity but ephemeral sessions. Spawned for tasks, sessions end on completion, but identity and work history persist.
+- **ACP**: the runtime interface for native agent integrations over JSON-RPC/stdin. See [ACP v1](docs/acp-v1.md).
+- **Plugins**: packaged Deacon/Dog automation with installable metadata. See [Plugin Packages](docs/plugin-packages.md).
+- **Skills**: canonical skill packages with metadata, fixtures, sync, test, and audit flows. See [Skill Packages](docs/skills-packages.md).
+- **Seance**: session recovery and predecessor discovery from `.events.jsonl`.
+- **Wasteland**: federated work exchange and portable reputation across towns. See [Wasteland](docs/WASTELAND.md).
 
-### Hooks 🪝
+Other advanced concepts such as molecules, formulas, overlays, and federation
+design are documented under [docs](docs/overview.md).
 
-Git worktree-based persistent storage for agent work. Survives crashes and restarts.
-
-### Convoys 🚚
-
-Work tracking units. Bundle multiple beads that get assigned to agents. Convoys labeled `mountain` get autonomous stall detection and smart skip logic for epic-scale execution.
-
-### Beads Integration 📿
-
-Git-backed issue tracking system that stores work state as structured data.
-
-**Bead IDs** (also called **issue IDs**) use a prefix + 5-character alphanumeric format (e.g., `gt-abc12`, `hq-x7k2m`). The prefix indicates the item's origin or rig. Commands like `gt sling` and `gt convoy` accept these IDs to reference specific work items. The terms "bead" and "issue" are used interchangeably—beads are the underlying data format, while issues are the work items stored as beads.
-
-### Molecules 🧬
-
-Workflow templates that coordinate multi-step work. Formulas (TOML definitions) are instantiated as molecules with tracked steps. Two modes: root-only wisps (steps materialized at runtime, lightweight) and poured wisps (steps materialized as sub-wisps with checkpoint recovery). See [Molecules](docs/concepts/molecules.md).
-
-### Monitoring: Witness, Deacon, Dogs 🐕
-
-A three-tier watchdog system keeps agents healthy:
-
-- **Witness** - Per-rig lifecycle manager. Monitors polecats, detects stuck agents, triggers recovery, manages session cleanup.
-- **Deacon** - Background supervisor running continuous patrol cycles across all rigs.
-- **Dogs** - Infrastructure workers dispatched by the Deacon for maintenance tasks (e.g., Boot for triage).
-
-### Refinery 🏭
-
-Per-rig merge queue processor. When polecats complete work via `gt done`, the Refinery batches merge requests, runs verification gates, and merges to main using a Bors-style bisecting queue. Failed MRs are isolated and either fixed inline or re-dispatched.
-
-### Escalation 🚨
-
-Severity-routed issue escalation. Agents that hit blockers escalate via `gt escalate`, which creates tracked beads routed through the Deacon, Mayor, and (if needed) Overseer. Severity levels: CRITICAL (P0), HIGH (P1), MEDIUM (P2). See [Escalation](docs/design/escalation.md).
-
-### Scheduler ⏱️
-
-Config-driven capacity governor for polecat dispatch. Prevents API rate limit exhaustion by batching dispatch under configurable concurrency limits. Default is direct dispatch; set `scheduler.max_polecats` to enable deferred dispatch with the daemon. See [Scheduler](docs/design/scheduler.md).
-
-### Seance 👻
-
-Session discovery and continuation. Discovers previous agent sessions via `.events.jsonl` logs, enabling agents to query their predecessors for context and decisions from earlier work.
-
-```bash
-gt seance                       # List discoverable predecessor sessions
-gt seance --talk <id> -p "What did you find?"  # One-shot question
-```
-
-### Wasteland 🏜️
-
-Federated work coordination network linking Gas Towns through DoltHub. Rigs post wanted items, claim work from other towns, submit completion evidence, and earn portable reputation via multi-dimensional stamps. See [Wasteland](docs/WASTELAND.md).
-
-> **New to Gas Town?** See the [Glossary](docs/glossary.md) for a complete guide to terminology and concepts.
+> New here? Use the [Glossary](docs/glossary.md) only when you need the deeper vocabulary.
 
 ## Installation
 

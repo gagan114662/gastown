@@ -2,6 +2,9 @@
 name = "quality-review"
 description = "Review merge quality and track per-worker trends"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["beads:read", "beads:write", "events:read"]
 
 [gate]
 type = "cooldown"

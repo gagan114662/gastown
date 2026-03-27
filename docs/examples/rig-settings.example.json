@@ -25,6 +25,27 @@
         "refinery": "pi"
     },
 
+    "memory": {
+        "min_confidence": 0.8,
+        "allowed_statuses": ["active", "review"],
+        "stale_after_days": 14
+    },
+
+    "policy": {
+        "role_policies": {
+            "polecat": {
+                "gt_subcommands": ["prime", "hook", "done", "handoff"],
+                "write_roots": ["$GT_RIG_ROOT/polecats", "$GT_RIG_ROOT/worktrees"],
+                "branch_patterns": ["polecat/*"]
+            },
+            "refinery": {
+                "commands": ["gt", "bd", "git"],
+                "branch_patterns": ["main", "integration/*", "refinery/*"],
+                "push": true
+            }
+        }
+    },
+
     "merge_queue": {
         "enabled": true,
         "integration_branch_polecat_enabled": true,

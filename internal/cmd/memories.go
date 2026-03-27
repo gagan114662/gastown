@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/ctxstack"
@@ -12,9 +13,17 @@ import (
 
 var memoriesTypeFilter string
 
+var memoriesAuditCmd = &cobra.Command{
+	Use:   "audit",
+	Short: "Audit memories for stale, superseded, or low-confidence records",
+	Args:  cobra.NoArgs,
+	RunE:  runMemoriesAudit,
+}
+
 func init() {
 	memoriesCmd.Flags().StringVar(&memoriesTypeFilter, "type", "", "Filter by memory type: feedback, project, user, reference, general")
 	memoriesCmd.GroupID = GroupWork
+	memoriesCmd.AddCommand(memoriesAuditCmd)
 	rootCmd.AddCommand(memoriesCmd)
 }
 
@@ -69,7 +78,7 @@ func runMemories(cmd *cobra.Command, args []string) error {
 	type memory struct {
 		memType  string
 		shortKey string
-		value    string
+		record   memoryRecord
 	}
 	var memories []memory
 
@@ -92,7 +101,7 @@ func runMemories(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		memories = append(memories, memory{memType: memType, shortKey: shortKey, value: v})
+		memories = append(memories, memory{memType: memType, shortKey: shortKey, record: decodeMemoryRecord(memType, shortKey, v)})
 	}
 
 	sort.Slice(memories, func(i, j int) bool {
@@ -132,7 +141,8 @@ func runMemories(cmd *cobra.Command, args []string) error {
 			lastType = m.memType
 		}
 		fmt.Printf("  %s\n", style.Bold.Render(m.shortKey))
-		fmt.Printf("    %s\n\n", m.value)
+		fmt.Printf("    %s\n", m.record.Content)
+		fmt.Printf("    %s\n\n", style.Dim.Render(memoryMetadataLine(m.record)))
 	}
 
 	return nil
@@ -212,4 +222,54 @@ func memTypeRank(memType string) int {
 		}
 	}
 	return len(memoryTypeOrder)
+}
+
+func runMemoriesAudit(cmd *cobra.Command, args []string) error {
+	kvs, err := bdKvListJSON()
+	if err != nil {
+		return fmt.Errorf("listing memories: %w", err)
+	}
+	policy := loadMemoryPolicy(detectTownRootFromCwd(), currentContextRig())
+	now := time.Now().UTC()
+
+	type finding struct {
+		key     string
+		message string
+	}
+	var findings []finding
+	for k, v := range kvs {
+		if !strings.HasPrefix(k, memoryKeyPrefix) {
+			continue
+		}
+		memType, shortKey := parseMemoryKey(k)
+		record := decodeMemoryRecord(memType, shortKey, v)
+		if record.Source == "legacy-kv" {
+			findings = append(findings, finding{key: shortKey, message: "legacy unstructured format"})
+		}
+		if record.Confidence < policy.MinConfidence {
+			findings = append(findings, finding{key: shortKey, message: fmt.Sprintf("confidence %.2f below policy %.2f", record.Confidence, policy.MinConfidence)})
+		}
+		if !policy.AllowedStatus[record.Status] {
+			findings = append(findings, finding{key: shortKey, message: "status excluded from prime: " + string(record.Status)})
+		}
+		if len(record.Supersedes) > 0 {
+			findings = append(findings, finding{key: shortKey, message: "supersedes " + strings.Join(record.Supersedes, ", ")})
+		}
+		if validatedAt, ok := parseMemoryTime(record.LastValidatedAt); ok && policy.StaleAfterDays > 0 {
+			if now.Sub(validatedAt) > time.Duration(policy.StaleAfterDays)*24*time.Hour {
+				findings = append(findings, finding{key: shortKey, message: fmt.Sprintf("last validated %s", validatedAt.Format("2006-01-02"))})
+			}
+		}
+	}
+
+	if len(findings) == 0 {
+		fmt.Printf("%s No memory audit findings\n", style.Success.Render("✓"))
+		return nil
+	}
+
+	fmt.Printf("%s Memory audit findings (%d)\n\n", style.Warning.Render("!"), len(findings))
+	for _, finding := range findings {
+		fmt.Printf("  %s %s\n", style.Bold.Render(finding.key), finding.message)
+	}
+	return nil
 }

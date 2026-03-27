@@ -98,5 +98,31 @@
         "min_aggregate_count": 3
     },
 
+    "memory": {
+        "min_confidence": 0.7,
+        "allowed_statuses": ["active"],
+        "stale_after_days": 21
+    },
+
+    "policy": {
+        "role_policies": {
+            "polecat": {
+                "commands": ["gt", "bd"],
+                "gt_subcommands": ["prime", "hook", "done", "handoff", "mail", "escalate"],
+                "bd_subcommands": ["show", "update", "done"],
+                "write_roots": ["$GT_RIG_ROOT/polecats", "$GT_ROOT/.runtime"],
+                "branch_patterns": ["polecat/*", "integration/*"],
+                "network": "loopback",
+                "push": false
+            },
+            "witness": {
+                "commands": ["gt", "bd"],
+                "gt_subcommands": ["feed", "patrol", "policy", "prime"],
+                "branch_patterns": ["main", "integration/*"],
+                "push": false
+            }
+        }
+    },
+
     "disabled_patrols": ["doctor_dog", "compactor_dog"]
 }

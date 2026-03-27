@@ -168,14 +168,15 @@ func syncContextMemories(store *ctxstack.Store) error {
 			continue
 		}
 		memType, shortKey := parseMemoryKey(key)
-		if err := upsertMemoryContextDoc(store, memType, shortKey, value); err != nil {
+		record := decodeMemoryRecord(memType, shortKey, value)
+		if err := upsertMemoryContextDoc(store, memType, shortKey, record); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func upsertMemoryContextDoc(store *ctxstack.Store, memType, key, value string) error {
+func upsertMemoryContextDoc(store *ctxstack.Store, memType, key string, record memoryRecord) error {
 	if store == nil {
 		return nil
 	}
@@ -183,16 +184,19 @@ func upsertMemoryContextDoc(store *ctxstack.Store, memType, key, value string) e
 	if key != "" {
 		tags = append(tags, "key:"+key)
 	}
+	tags = append(tags, "status:"+string(record.Status), fmt.Sprintf("scope:%s", record.Scope))
 	return store.UpsertRetrievalDoc(ctxstack.RetrievalDoc{
 		DocID:     memoryDocID(memType, key),
 		Tier:      ctxstack.TierCold,
 		Source:    "memory",
 		Tags:      tags,
-		Text:      strings.TrimSpace(key + "\n" + value),
+		Text:      strings.TrimSpace(key + "\n" + record.Content),
 		UpdatedAt: time.Now().UTC(),
 		RankFeatures: map[string]any{
 			"memory_type": memType,
 			"key":         key,
+			"status":      string(record.Status),
+			"confidence":  record.Confidence,
 		},
 	})
 }

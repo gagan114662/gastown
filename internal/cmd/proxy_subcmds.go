@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -33,17 +32,15 @@ polecatSafe annotation; the bd portion is a fixed list embedded here.
 The proxy server calls this command at startup and falls back to its
 built-in default if discovery fails.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		var gtSubs []string
-		for _, c := range rootCmd.Commands() {
-			if c.Annotations[AnnotationPolecatSafe] == "true" {
-				gtSubs = append(gtSubs, c.Name())
-			}
-		}
-		sort.Strings(gtSubs)
-		fmt.Printf("gt:%s;bd:%s\n", strings.Join(gtSubs, ","), bdSafeSubcmds)
+		policy, _, _, _, _ := resolveRolePolicyContext(policyRole, policyRig, true)
+		gtSubs := filteredGTSubcommands(policy)
+		bdSubs := filteredBDSubcommands(policy)
+		fmt.Printf("gt:%s;bd:%s\n", strings.Join(gtSubs, ","), strings.Join(bdSubs, ","))
 	},
 }
 
 func init() {
+	proxySubcmdsCmd.Flags().StringVar(&policyRole, "role", "polecat", "Role policy context to apply")
+	proxySubcmdsCmd.Flags().StringVar(&policyRig, "rig", "", "Rig name override for policy resolution")
 	rootCmd.AddCommand(proxySubcmdsCmd)
 }

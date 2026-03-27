@@ -94,6 +94,9 @@ func runWlStamp(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading wasteland config: %w", err)
 	}
+	if err := requireWastelandTier(townRoot, wlCfg, wasteland.TierWarChief, "stamp work"); err != nil {
+		return err
+	}
 	author := wlCfg.RigHandle
 
 	if author == wlStampSubject {

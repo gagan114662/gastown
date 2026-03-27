@@ -57,6 +57,15 @@ while read local_ref local_sha remote_ref remote_sha; do
 
   branch="${remote_ref#refs/heads/}"
 
+  # Optional role policy guard. This lets operator-configured role policies
+  # further restrict push behavior without weakening the hardcoded safety rails
+  # below. When no policy is configured, the helper exits successfully.
+  if command -v gt >/dev/null 2>&1; then
+    if ! gt policy pre-push-check --branch "$branch"; then
+      exit 1
+    fi
+  fi
+
   case "$branch" in
     "${default_branch}"|beads-sync|polecat/*|integration/*)
       # Allowed branches

@@ -2,6 +2,9 @@
 name = "stuck-agent-dog"
 description = "Context-aware stuck/crashed agent detection and restart for polecats and deacons"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["tmux:read", "tmux:write", "beads:read", "session:restart"]
 
 [gate]
 type = "cooldown"
