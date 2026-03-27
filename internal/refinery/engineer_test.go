@@ -40,6 +40,53 @@ func TestDefaultMergeQueueConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultMergeQueueConfig_DefaultGates(t *testing.T) {
+	cfg := DefaultMergeQueueConfig()
+
+	if len(cfg.Gates) == 0 {
+		t.Fatal("expected DefaultMergeQueueConfig to include default gates, got none")
+	}
+
+	build, ok := cfg.Gates["build"]
+	if !ok {
+		t.Error("expected default 'build' gate")
+	} else {
+		if build.Cmd != "go build ./cmd/gt" {
+			t.Errorf("build gate cmd = %q, want %q", build.Cmd, "go build ./cmd/gt")
+		}
+		if build.Phase != GatePhasePreMerge {
+			t.Errorf("build gate phase = %q, want %q", build.Phase, GatePhasePreMerge)
+		}
+	}
+
+	vet, ok := cfg.Gates["vet"]
+	if !ok {
+		t.Error("expected default 'vet' gate")
+	} else {
+		if vet.Cmd != "go vet ./..." {
+			t.Errorf("vet gate cmd = %q, want %q", vet.Cmd, "go vet ./...")
+		}
+		if vet.Phase != GatePhasePreMerge {
+			t.Errorf("vet gate phase = %q, want %q", vet.Phase, GatePhasePreMerge)
+		}
+	}
+
+	test, ok := cfg.Gates["test"]
+	if !ok {
+		t.Error("expected default 'test' gate")
+	} else {
+		if test.Cmd != "go test ./... -count=1 -timeout=5m" {
+			t.Errorf("test gate cmd = %q, want %q", test.Cmd, "go test ./... -count=1 -timeout=5m")
+		}
+		if test.Phase != GatePhasePostSquash {
+			t.Errorf("test gate phase = %q, want %q", test.Phase, GatePhasePostSquash)
+		}
+		if test.Timeout != 5*time.Minute {
+			t.Errorf("test gate timeout = %v, want 5m", test.Timeout)
+		}
+	}
+}
+
 func TestEngineer_LoadConfig_NoFile(t *testing.T) {
 	// Create a temp directory without config.json
 	tmpDir, err := os.MkdirTemp("", "engineer-test-*")

@@ -182,6 +182,21 @@ func DefaultMergeQueueConfig() *MergeQueueConfig {
 		StaleClaimCriticalAfter: 6 * time.Hour,
 		MaxRetryCount:           5,
 		AutoPush:                true,
+		Gates: map[string]*GateConfig{
+			"build": {
+				Cmd:   "go build ./cmd/gt",
+				Phase: GatePhasePreMerge,
+			},
+			"vet": {
+				Cmd:   "go vet ./...",
+				Phase: GatePhasePreMerge,
+			},
+			"test": {
+				Cmd:     "go test ./... -count=1 -timeout=5m",
+				Phase:   GatePhasePostSquash,
+				Timeout: 5 * time.Minute,
+			},
+		},
 	}
 }
 
