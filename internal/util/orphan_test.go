@@ -77,13 +77,20 @@ func TestGetProcessCwd(t *testing.T) {
 	if cwd == "" {
 		t.Fatal("getProcessCwd(self) returned empty string")
 	}
-	// Verify it matches os.Getwd
+	// Verify it matches os.Getwd.
+	// On macOS, lsof resolves symlinks and returns the real path, while
+	// os.Getwd() may return a symlinked path (respecting the PWD env var).
+	// Resolve symlinks in the expected value so both sides are comparable.
 	expected, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("os.Getwd() error: %v", err)
 	}
-	if cwd != expected {
-		t.Errorf("getProcessCwd(self) = %q, want %q", cwd, expected)
+	expectedReal, err := filepath.EvalSymlinks(expected)
+	if err != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q): %v", expected, err)
+	}
+	if cwd != expectedReal {
+		t.Errorf("getProcessCwd(self) = %q, want %q", cwd, expectedReal)
 	}
 }
 
