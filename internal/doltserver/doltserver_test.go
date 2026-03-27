@@ -2071,7 +2071,7 @@ func TestIsDoltRetryableError_CatalogRace(t *testing.T) {
 func TestWaitForCatalog_NoServer(t *testing.T) {
 	// When no Dolt server is running, waitForCatalog should fail immediately
 	// (not retry) because the error is non-retryable (not a catalog race).
-	townRoot := t.TempDir()
+	townRoot := tempDirRetryCleanup(t)
 	if err := os.MkdirAll(filepath.Join(townRoot, ".dolt-data"), 0755); err != nil {
 		t.Fatal(err)
 	}
