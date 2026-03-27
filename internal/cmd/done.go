@@ -1,16 +1,19 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/events"
@@ -555,6 +558,12 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 			} else if contam.Behind >= warnThreshold {
 				style.PrintWarning("branch is %d commits behind %s — consider rebasing to avoid PR contamination", contam.Behind, originDefault)
 			}
+		}
+
+		// Pre-push validation: build check + YAML lint (hq-ts6s)
+		// Run before any push strategy to prevent broken code from reaching remote.
+		if err := runPrePushValidation(cwd); err != nil {
+			return err
 		}
 
 		// Determine merge strategy from convoy (gt-myofa.3)
@@ -1703,6 +1712,67 @@ func shouldRunDoneStrictVerification(mq *config.MergeQueueConfig, isNoMerge bool
 		return false
 	}
 	return true
+}
+
+// runPrePushValidation runs build and YAML lint checks before any push.
+// Returns an error with actionable output if either check fails. (hq-ts6s)
+func runPrePushValidation(cwd string) error {
+	// 1. Build check: run 'go build ./...' if this is a Go project.
+	// Only run when go.mod exists in cwd to avoid false-failing non-Go repos.
+	goModPath := filepath.Join(cwd, "go.mod")
+	if _, err := os.Stat(goModPath); err == nil {
+		fmt.Printf("Running go build ./... (pre-push validation)...\n")
+		buildCmd := exec.Command("go", "build", "./...")
+		buildCmd.Dir = cwd
+		var buildOut bytes.Buffer
+		buildCmd.Stdout = &buildOut
+		buildCmd.Stderr = &buildOut
+		if err := buildCmd.Run(); err != nil {
+			return fmt.Errorf("pre-push build check failed: go build ./... returned errors\n\n%s\n\nFix compilation errors before pushing.", buildOut.String())
+		}
+		fmt.Printf("  ✓ go build ./... passed\n")
+	}
+
+	// 2. YAML lint: validate any .yml/.yaml files changed in this branch.
+	// Use 'git diff --name-only origin/main..HEAD' to find changed YAML files.
+	diffCmd := exec.Command("git", "diff", "--name-only", "origin/main..HEAD")
+	diffCmd.Dir = cwd
+	var diffOut bytes.Buffer
+	diffCmd.Stdout = &diffOut
+	diffCmd.Stderr = &diffOut
+	if err := diffCmd.Run(); err != nil {
+		// Can't determine changed files — skip YAML check rather than blocking
+		return nil
+	}
+
+	var yamlErrors []string
+	for _, name := range strings.Split(strings.TrimSpace(diffOut.String()), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if !strings.HasSuffix(name, ".yml") && !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+		fullPath := filepath.Join(cwd, name)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			// File deleted or not readable — skip
+			continue
+		}
+		var doc any
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			yamlErrors = append(yamlErrors, fmt.Sprintf("  %s: %v", name, err))
+		}
+	}
+	if len(yamlErrors) > 0 {
+		return fmt.Errorf("pre-push YAML validation failed — fix these files before pushing:\n\n%s", strings.Join(yamlErrors, "\n"))
+	}
+	if strings.Contains(diffOut.String(), ".yml") || strings.Contains(diffOut.String(), ".yaml") {
+		fmt.Printf("  ✓ YAML lint passed\n")
+	}
+
+	return nil
 }
 
 // purgeClosedEphemeralBeads removes closed ephemeral beads (wisps) that accumulated
