@@ -1,9 +1,7 @@
 package controlplane
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -640,26 +638,4 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
-}
-
-func asMap(value interface{}) map[string]interface{} {
-	if value == nil {
-		return nil
-	}
-	if m, ok := value.(map[string]interface{}); ok {
-		return m
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return map[string]interface{}{"value": fmt.Sprint(value)}
-	}
-	var out map[string]interface{}
-	if err := json.Unmarshal(data, &out); err != nil {
-		return map[string]interface{}{"value": string(data)}
-	}
-	return out
-}
-
-func hasMeaningfulValue(value string) bool {
-	return strings.TrimSpace(value) != ""
 }

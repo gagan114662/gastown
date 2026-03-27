@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"errors"
 	"os/exec"
 	"testing"
 	"time"
@@ -156,6 +157,15 @@ func TestStoreUpsertAgentRuntime(t *testing.T) {
 	}
 	if got.LastEventKind != "session_start" {
 		t.Fatalf("LastEventKind = %q, want session_start", got.LastEventKind)
+	}
+}
+
+func TestOpenRequiresSQLiteBinary(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	_, err := Open(t.TempDir())
+	if !errors.Is(err, ErrSQLiteUnavailable) {
+		t.Fatalf("Open error = %v, want ErrSQLiteUnavailable", err)
 	}
 }
 

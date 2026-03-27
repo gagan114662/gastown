@@ -3,6 +3,7 @@ package controlplane
 import "errors"
 
 var ErrLeaseHeld = errors.New("lease already held")
+var ErrSQLiteUnavailable = errors.New("sqlite3 CLI not available")
 
 // TownEvent is the canonical operator/audit event shape.
 //

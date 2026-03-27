@@ -133,8 +133,9 @@ CREATE INDEX IF NOT EXISTS idx_dependency_status ON dependency_health(status, ch
 // repo can gain a real SQLite-backed authority without pulling a new Go driver
 // into the module in the same change.
 type Store struct {
-	townRoot string
-	dbPath   string
+	townRoot  string
+	dbPath    string
+	sqliteBin string
 }
 
 type sqlParam struct {
@@ -152,13 +153,18 @@ func Open(townRoot string) (*Store, error) {
 	if townRoot == "" {
 		return nil, fmt.Errorf("town root is required")
 	}
+	sqliteBin, err := exec.LookPath("sqlite3")
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrSQLiteUnavailable, err)
+	}
 	dir := filepath.Dir(DBPath(townRoot))
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("creating control-plane dir: %w", err)
 	}
 	s := &Store{
-		townRoot: townRoot,
-		dbPath:   DBPath(townRoot),
+		townRoot:  townRoot,
+		dbPath:    DBPath(townRoot),
+		sqliteBin: sqliteBin,
 	}
 	if err := s.exec(schemaSQL); err != nil {
 		return nil, err
@@ -476,7 +482,7 @@ func (s *Store) runSQLite(sql string, params []sqlParam, stdout *bytes.Buffer, j
 		args = append(args, "-json")
 	}
 	args = append(args, s.dbPath)
-	cmd := exec.Command("sqlite3", args...)
+	cmd := exec.Command(s.sqliteBin, args...)
 
 	var script bytes.Buffer
 	script.WriteString(".bail on\n")
@@ -544,7 +550,7 @@ func sqliteParamValue(value interface{}) string {
 		if v == "" {
 			return "NULL"
 		}
-		return sqliteTextExpr(v)
+		return sqliteCLIQuotedString(v)
 	case int:
 		return strconv.Itoa(v)
 	case int64:
@@ -555,8 +561,35 @@ func sqliteParamValue(value interface{}) string {
 		}
 		return "0"
 	default:
-		return sqliteTextExpr(fmt.Sprint(v))
+		return sqliteCLIQuotedString(fmt.Sprint(v))
 	}
+}
+
+func sqliteCLIQuotedString(value string) string {
+	var out strings.Builder
+	out.Grow(len(value) + 2)
+	out.WriteByte('"')
+	for _, r := range value {
+		switch r {
+		case '\\':
+			out.WriteString(`\\`)
+		case '"':
+			out.WriteString(`\"`)
+		case '\n':
+			out.WriteString(`\n`)
+		case '\r':
+			out.WriteString(`\r`)
+		case '\t':
+			out.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				return sqliteTextExpr(value)
+			}
+			out.WriteRune(r)
+		}
+	}
+	out.WriteByte('"')
+	return out.String()
 }
 
 func sqliteTextExpr(value string) string {
