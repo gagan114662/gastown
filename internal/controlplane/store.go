@@ -137,6 +137,11 @@ type Store struct {
 	dbPath   string
 }
 
+type sqlParam struct {
+	name  string
+	value interface{}
+}
+
 // DBPath returns the canonical control-plane SQLite path.
 func DBPath(townRoot string) string {
 	return filepath.Join(townRoot, controlPlaneDir, dbName)
@@ -172,15 +177,15 @@ func (s *Store) RecordEvent(event TownEvent) error {
 		return fmt.Errorf("marshal evidence: %w", err)
 	}
 
-	sql := fmt.Sprintf(`
+	const sql = `
 INSERT INTO events (
   event_id, ts, kind, event_type, actor, role, rig, session, run_id,
   bead_id, mr_id, convoy_id, outcome, reason, duration_ms, visibility,
   source, payload_json, evidence_json
 ) VALUES (
-  %s, %s, %s, %s, %s, %s, %s, %s, %s,
-  %s, %s, %s, %s, %s, %d, %s,
-  %s, %s, %s
+  @event_id, @ts, @kind, @event_type, @actor, @role, @rig, @session, @run_id,
+  @bead_id, @mr_id, @convoy_id, @outcome, @reason, @duration_ms, @visibility,
+  @source, @payload_json, @evidence_json
 )
 ON CONFLICT(event_id) DO UPDATE SET
   ts=excluded.ts,
@@ -201,28 +206,42 @@ ON CONFLICT(event_id) DO UPDATE SET
   source=excluded.source,
   payload_json=excluded.payload_json,
   evidence_json=excluded.evidence_json;
-`, sqlString(event.EventID), sqlString(event.Timestamp), sqlString(event.Kind),
-		sqlString(event.Type), sqlString(event.Actor), sqlString(event.Role),
-		sqlString(event.Rig), sqlString(event.Session), sqlString(event.RunID),
-		sqlString(event.BeadID), sqlString(event.MRID), sqlString(event.ConvoyID),
-		sqlString(event.Outcome), sqlString(event.Reason), event.DurationMs,
-		sqlString(event.Visibility), sqlString(event.Source), sqlString(payloadJSON),
-		sqlString(evidenceJSON))
+`
 
-	return s.exec(sql)
+	return s.execParams(sql,
+		sqlParam{name: "@event_id", value: event.EventID},
+		sqlParam{name: "@ts", value: event.Timestamp},
+		sqlParam{name: "@kind", value: event.Kind},
+		sqlParam{name: "@event_type", value: event.Type},
+		sqlParam{name: "@actor", value: event.Actor},
+		sqlParam{name: "@role", value: event.Role},
+		sqlParam{name: "@rig", value: event.Rig},
+		sqlParam{name: "@session", value: event.Session},
+		sqlParam{name: "@run_id", value: event.RunID},
+		sqlParam{name: "@bead_id", value: event.BeadID},
+		sqlParam{name: "@mr_id", value: event.MRID},
+		sqlParam{name: "@convoy_id", value: event.ConvoyID},
+		sqlParam{name: "@outcome", value: event.Outcome},
+		sqlParam{name: "@reason", value: event.Reason},
+		sqlParam{name: "@duration_ms", value: event.DurationMs},
+		sqlParam{name: "@visibility", value: event.Visibility},
+		sqlParam{name: "@source", value: event.Source},
+		sqlParam{name: "@payload_json", value: payloadJSON},
+		sqlParam{name: "@evidence_json", value: evidenceJSON},
+	)
 }
 
 // UpsertAgentRuntime writes the current runtime projection for an agent/session.
 func (s *Store) UpsertAgentRuntime(record AgentRuntimeRecord) error {
-	sql := fmt.Sprintf(`
+	const sql = `
 INSERT INTO agents (
   agent_id, role, rig, agent_name, session, run_id, work_dir, status,
   status_reason, source_agreement, last_event_id, last_event_kind,
   last_event_ts, updated_at
 ) VALUES (
-  %s, %s, %s, %s, %s, %s, %s, %s,
-  %s, %s, %s, %s,
-  %s, %s
+  @agent_id, @role, @rig, @agent_name, @session, @run_id, @work_dir, @status,
+  @status_reason, @source_agreement, @last_event_id, @last_event_kind,
+  @last_event_ts, @updated_at
 )
 ON CONFLICT(agent_id) DO UPDATE SET
   role=excluded.role,
@@ -238,13 +257,23 @@ ON CONFLICT(agent_id) DO UPDATE SET
   last_event_kind=excluded.last_event_kind,
   last_event_ts=excluded.last_event_ts,
   updated_at=excluded.updated_at;
-`, sqlString(record.AgentID), sqlString(record.Role), sqlString(record.Rig),
-		sqlString(record.AgentName), sqlString(record.Session), sqlString(record.RunID),
-		sqlString(record.WorkDir), sqlString(record.Status), sqlString(record.StatusReason),
-		sqlString(record.SourceAgreement), sqlString(record.LastEventID),
-		sqlString(record.LastEventKind), sqlString(record.LastEventTS),
-		sqlString(record.UpdatedAt))
-	return s.exec(sql)
+`
+	return s.execParams(sql,
+		sqlParam{name: "@agent_id", value: record.AgentID},
+		sqlParam{name: "@role", value: record.Role},
+		sqlParam{name: "@rig", value: record.Rig},
+		sqlParam{name: "@agent_name", value: record.AgentName},
+		sqlParam{name: "@session", value: record.Session},
+		sqlParam{name: "@run_id", value: record.RunID},
+		sqlParam{name: "@work_dir", value: record.WorkDir},
+		sqlParam{name: "@status", value: record.Status},
+		sqlParam{name: "@status_reason", value: record.StatusReason},
+		sqlParam{name: "@source_agreement", value: record.SourceAgreement},
+		sqlParam{name: "@last_event_id", value: record.LastEventID},
+		sqlParam{name: "@last_event_kind", value: record.LastEventKind},
+		sqlParam{name: "@last_event_ts", value: record.LastEventTS},
+		sqlParam{name: "@updated_at", value: record.UpdatedAt},
+	)
 }
 
 // ListEvents returns recent events ordered newest-first.
@@ -253,14 +282,14 @@ func (s *Store) ListEvents(limit int) ([]TownEvent, error) {
 		limit = 50
 	}
 	var rows []eventRow
-	if err := s.queryJSON(fmt.Sprintf(`
+	if err := s.queryJSONParams(`
 SELECT event_id, ts, kind, event_type, actor, role, rig, session, run_id,
        bead_id, mr_id, convoy_id, outcome, reason, duration_ms, visibility,
        source, payload_json, evidence_json
 FROM events
 ORDER BY ts DESC
-LIMIT %d;
-`, limit), &rows); err != nil {
+LIMIT @limit;
+`, &rows, sqlParam{name: "@limit", value: limit}); err != nil {
 		return nil, err
 	}
 	return decodeEventRows(rows)
@@ -272,15 +301,18 @@ func (s *Store) ListEventsBySession(sessionID string, limit int) ([]TownEvent, e
 		limit = 20
 	}
 	var rows []eventRow
-	if err := s.queryJSON(fmt.Sprintf(`
+	if err := s.queryJSONParams(`
 SELECT event_id, ts, kind, event_type, actor, role, rig, session, run_id,
        bead_id, mr_id, convoy_id, outcome, reason, duration_ms, visibility,
        source, payload_json, evidence_json
 FROM events
-WHERE session = %s
+WHERE session = @session
 ORDER BY ts DESC
-LIMIT %d;
-`, sqlString(sessionID), limit), &rows); err != nil {
+LIMIT @limit;
+`, &rows,
+		sqlParam{name: "@session", value: sessionID},
+		sqlParam{name: "@limit", value: limit},
+	); err != nil {
 		return nil, err
 	}
 	return decodeEventRows(rows)
@@ -304,14 +336,17 @@ ORDER BY updated_at DESC;
 // GetAgentRuntime looks up a specific agent/session record.
 func (s *Store) GetAgentRuntime(agentID string) (*AgentRuntimeRecord, error) {
 	var rows []AgentRuntimeRecord
-	if err := s.queryJSON(fmt.Sprintf(`
+	if err := s.queryJSONParams(`
 SELECT agent_id, role, rig, agent_name, session, run_id, work_dir, status,
        status_reason, source_agreement, last_event_id, last_event_kind,
        last_event_ts, updated_at
 FROM agents
-WHERE agent_id = %s OR session = %s
+WHERE agent_id = @agent_id OR session = @session_id
 LIMIT 1;
-`, sqlString(agentID), sqlString(agentID)), &rows); err != nil {
+`, &rows,
+		sqlParam{name: "@agent_id", value: agentID},
+		sqlParam{name: "@session_id", value: agentID},
+	); err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
@@ -413,33 +448,70 @@ func decodeEventRows(rows []eventRow) ([]TownEvent, error) {
 }
 
 func (s *Store) exec(sql string) error {
-	cmd := exec.Command("sqlite3", s.dbPath, sql)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return fmt.Errorf("sqlite3 exec: %v: %s", err, strings.TrimSpace(stderr.String()))
-		}
-		return fmt.Errorf("sqlite3 exec: %w", err)
-	}
-	return nil
+	return s.execParams(sql)
 }
 
 func (s *Store) queryJSON(sql string, out interface{}) error {
-	cmd := exec.Command("sqlite3", "-json", s.dbPath, sql)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderr.Len() > 0 {
-			return fmt.Errorf("sqlite3 query: %v: %s", err, strings.TrimSpace(stderr.String()))
-		}
-		return fmt.Errorf("sqlite3 query: %w", err)
+	return s.queryJSONParams(sql, out)
+}
+
+func (s *Store) execParams(sql string, params ...sqlParam) error {
+	return s.runSQLite(sql, params, nil, false)
+}
+
+func (s *Store) queryJSONParams(sql string, out interface{}, params ...sqlParam) error {
+	var stdout bytes.Buffer
+	if err := s.runSQLite(sql, params, &stdout, true); err != nil {
+		return err
 	}
 	if stdout.Len() == 0 {
 		return nil
 	}
 	return json.Unmarshal(stdout.Bytes(), out)
+}
+
+func (s *Store) runSQLite(sql string, params []sqlParam, stdout *bytes.Buffer, jsonOutput bool) error {
+	args := make([]string, 0, 2)
+	if jsonOutput {
+		args = append(args, "-json")
+	}
+	args = append(args, s.dbPath)
+	cmd := exec.Command("sqlite3", args...)
+
+	var script bytes.Buffer
+	script.WriteString(".bail on\n")
+	script.WriteString(".parameter init\n")
+	script.WriteString(".parameter clear\n")
+	for _, param := range params {
+		if strings.TrimSpace(param.name) == "" {
+			continue
+		}
+		fmt.Fprintf(&script, ".parameter set %s %s\n", param.name, sqliteParamValue(param.value))
+	}
+	script.WriteString(sql)
+	if !strings.HasSuffix(sql, "\n") {
+		script.WriteByte('\n')
+	}
+
+	cmd.Stdin = &script
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			if jsonOutput {
+				return fmt.Errorf("sqlite3 query: %v: %s", err, strings.TrimSpace(stderr.String()))
+			}
+			return fmt.Errorf("sqlite3 exec: %v: %s", err, strings.TrimSpace(stderr.String()))
+		}
+		if jsonOutput {
+			return fmt.Errorf("sqlite3 query: %w", err)
+		}
+		return fmt.Errorf("sqlite3 exec: %w", err)
+	}
+	return nil
 }
 
 func marshalJSONText(value map[string]interface{}) (string, error) {
@@ -464,11 +536,36 @@ func unmarshalJSONMap(raw string) (map[string]interface{}, error) {
 	return out, nil
 }
 
-func sqlString(value string) string {
-	if value == "" {
+func sqliteParamValue(value interface{}) string {
+	switch v := value.(type) {
+	case nil:
 		return "NULL"
+	case string:
+		if v == "" {
+			return "NULL"
+		}
+		return sqliteTextExpr(v)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case bool:
+		if v {
+			return "1"
+		}
+		return "0"
+	default:
+		return sqliteTextExpr(fmt.Sprint(v))
 	}
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func sqliteTextExpr(value string) string {
+	runes := []rune(value)
+	parts := make([]string, 0, len(runes))
+	for _, r := range runes {
+		parts = append(parts, strconv.FormatInt(int64(r), 10))
+	}
+	return "char(" + strings.Join(parts, ",") + ")"
 }
 
 func isIncidentEvent(event TownEvent) bool {
