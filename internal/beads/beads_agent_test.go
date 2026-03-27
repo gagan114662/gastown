@@ -82,8 +82,9 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			"setlocal EnableDelayedExpansion\r\n" +
 			"set \"cmd=\"\r\n" +
 			"set \"id=\"\r\n" +
-			"set \"arg2=\"\r\n" +
-			"set \"arg3=\"\r\n" +
+			"set \"sql=\"\r\n" +
+			"set \"statearg=\"\r\n" +
+			"set \"stateextra=\"\r\n" +
 			":findcmd\r\n" +
 			"if \"%~1\"==\"\" goto havecmd\r\n" +
 			"set \"arg=%~1\"\r\n" +
@@ -93,19 +94,21 @@ func installMockBDForAgentStateUpdate(t *testing.T, showOutput, logPath string) 
 			")\r\n" +
 			"set \"cmd=%~1\"\r\n" +
 			"set \"id=%~2\"\r\n" +
-			"set \"arg2=%~2\"\r\n" +
-			"set \"arg3=%~3\"\r\n" +
+			"set \"sql=%~2\"\r\n" +
+			"set \"statearg=%~3\"\r\n" +
+			"set \"stateextra=%~4\"\r\n" +
 			":havecmd\r\n" +
 			"if /I \"%cmd%\"==\"version\" (\r\n" +
 			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale version\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
 			"if /I \"%cmd%\"==\"sql\" (\r\n" +
-			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale sql %arg2%\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(--allow-stale sql %sql%\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
 			"if /I \"%cmd%\"==\"set-state\" (\r\n" +
-			"  >> \"%MOCK_BD_LOG%\" echo(set-state %id% %arg3%\r\n" +
+			"  if not \"!stateextra!\"==\"\" if \"!statearg!\"==\"!statearg:=!\" set \"statearg=!statearg!=!stateextra!\"\r\n" +
+			"  >> \"%MOCK_BD_LOG%\" echo(set-state !id! !statearg!\r\n" +
 			"  exit /b 0\r\n" +
 			")\r\n" +
 			"if /I \"%cmd%\"==\"update\" (\r\n" +
