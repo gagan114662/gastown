@@ -11,6 +11,8 @@ import (
 
 	"github.com/steveyegge/gastown/internal/acp"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/session"
 	"github.com/steveyegge/gastown/internal/templates"
 	"github.com/steveyegge/gastown/internal/tmux"
@@ -155,6 +157,22 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 		return fmt.Errorf("creating mayor directory: %w", err)
 	}
 
+	leaseID := controlplane.LeaseKey("mayor", "")
+	leaseStore, releaseLeaseOnError, err := acquireManagerLease(m.townRoot, controlplane.LeaseRecord{
+		LeaseID: leaseID,
+		Service: "mayor",
+		Session: sessionID,
+		Holder:  "Mayor",
+		Status:  "active",
+		Detail:  "tmux",
+	})
+	if err != nil {
+		if errors.Is(err, controlplane.ErrLeaseHeld) {
+			return ErrAlreadyRunning
+		}
+		return err
+	}
+
 	// Use unified session lifecycle for config → settings → command → create → env → theme → wait.
 	theme := tmux.ResolveSessionTheme(m.townRoot, "", "mayor")
 	_, err = session.StartSession(t, session.SessionConfig{
@@ -176,7 +194,26 @@ func (m *Manager) StartTMUX(agentOverride string) error {
 		AcceptBypass:  true,
 	})
 	if err != nil {
+		if releaseLeaseOnError && leaseStore != nil {
+			_ = leaseStore.ReleaseLease(leaseID, "start failed")
+		}
 		return err
+	}
+	if leaseStore != nil {
+		_ = events.LogEventAt(m.townRoot, events.Event{
+			Kind:       events.TypeLeaseAcquired,
+			Type:       events.TypeLeaseAcquired,
+			Actor:      "mayor",
+			Role:       "mayor",
+			Session:    sessionID,
+			Outcome:    "success",
+			Reason:     "tmux manager started",
+			Visibility: events.VisibilityAudit,
+			Payload: map[string]interface{}{
+				"service": "mayor",
+				"mode":    "tmux",
+			},
+		})
 	}
 
 	time.Sleep(session.ShutdownDelay())
@@ -202,6 +239,41 @@ func (m *Manager) StartACP(ctx context.Context, agentOverride, rigName string) e
 
 	if !config.RuntimeConfigSupportsACP(rc) {
 		return fmt.Errorf("agent '%s' does not support ACP. Use an ACP-compatible agent like 'opencode'.", agentName)
+	}
+
+	leaseID := controlplane.LeaseKey("mayor", "")
+	leaseStore, releaseLeaseOnError, err := acquireManagerLease(m.townRoot, controlplane.LeaseRecord{
+		LeaseID: leaseID,
+		Service: "mayor",
+		Session: m.SessionName(),
+		Holder:  agentName,
+		Status:  "active",
+		Detail:  "acp",
+	})
+	if err != nil {
+		if errors.Is(err, controlplane.ErrLeaseHeld) {
+			return ErrAlreadyRunning
+		}
+		return err
+	}
+	if leaseStore != nil {
+		defer func() {
+			_ = leaseStore.ReleaseLease(leaseID, "acp session ended")
+			_ = events.LogEventAt(m.townRoot, events.Event{
+				Kind:       events.TypeLeaseReleased,
+				Type:       events.TypeLeaseReleased,
+				Actor:      "mayor",
+				Role:       "mayor",
+				Session:    m.SessionName(),
+				Outcome:    "success",
+				Reason:     "acp session ended",
+				Visibility: events.VisibilityAudit,
+				Payload: map[string]interface{}{
+					"service": "mayor",
+					"mode":    "acp",
+				},
+			})
+		}()
 	}
 
 	// Prepare environment
@@ -310,7 +382,27 @@ func (m *Manager) StartACP(ctx context.Context, agentOverride, rigName string) e
 	}
 
 	if err := proxy.Start(ctx, execCmd, agentArgs, mayorDir); err != nil {
+		if releaseLeaseOnError && leaseStore != nil {
+			_ = leaseStore.ReleaseLease(leaseID, "acp start failed")
+		}
 		return fmt.Errorf("starting agent: %w", err)
+	}
+	releaseLeaseOnError = false
+	if leaseStore != nil {
+		_ = events.LogEventAt(m.townRoot, events.Event{
+			Kind:       events.TypeLeaseAcquired,
+			Type:       events.TypeLeaseAcquired,
+			Actor:      "mayor",
+			Role:       "mayor",
+			Session:    m.SessionName(),
+			Outcome:    "success",
+			Reason:     "acp manager started",
+			Visibility: events.VisibilityAudit,
+			Payload: map[string]interface{}{
+				"service": "mayor",
+				"mode":    "acp",
+			},
+		})
 	}
 
 	// Start background polling only after the agent process has successfully started.
@@ -344,8 +436,36 @@ func (m *Manager) Stop() error {
 	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
 	}
+	if store, err := controlplane.Open(m.townRoot); err == nil {
+		_ = store.ReleaseLease(controlplane.LeaseKey("mayor", ""), "tmux session stopped")
+	}
+	_ = events.LogEventAt(m.townRoot, events.Event{
+		Kind:       events.TypeLeaseReleased,
+		Type:       events.TypeLeaseReleased,
+		Actor:      "mayor",
+		Role:       "mayor",
+		Session:    sessionID,
+		Outcome:    "success",
+		Reason:     "tmux session stopped",
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"service": "mayor",
+			"mode":    "tmux",
+		},
+	})
 
 	return nil
+}
+
+func acquireManagerLease(townRoot string, record controlplane.LeaseRecord) (*controlplane.Store, bool, error) {
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		return nil, false, nil
+	}
+	if _, err := store.AcquireLease(record); err != nil {
+		return store, false, fmt.Errorf("acquiring %s lease: %w", record.Service, err)
+	}
+	return store, true, nil
 }
 
 // IsRunning checks if the mayor session is active in TMUX mode.

@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
-          go-version: '1.26'
+          go-version: '1.25.8'
           cache: false
 
       - name: Cache Go modules
@@ -47,10 +47,8 @@ jobs:
       - name: Install Dolt
         shell: pwsh
         run: |
-          $release = Invoke-RestMethod 'https://api.github.com/repos/dolthub/dolt/releases/latest'
-          $asset = $release.assets | Where-Object { $_.name -like 'dolt-windows-amd64.zip' }
           $zip = "$env:RUNNER_TEMP\dolt.zip"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
+          Invoke-WebRequest -Uri 'https://github.com/dolthub/dolt/releases/download/v1.82.4/dolt-windows-amd64.zip' -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\dolt"
           $bin = Get-ChildItem -Path "$env:RUNNER_TEMP\dolt" -Recurse -Filter 'dolt.exe' | Select-Object -First 1
           $gopathBin = "$(go env GOPATH)\bin"

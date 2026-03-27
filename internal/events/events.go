@@ -9,19 +9,35 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/google/uuid"
+	"github.com/steveyegge/gastown/internal/controlplane"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // Event represents an activity event in Gas Town.
 type Event struct {
+	EventID    string                 `json:"event_id,omitempty"`
 	Timestamp  string                 `json:"ts"`
 	Source     string                 `json:"source"`
+	Kind       string                 `json:"kind,omitempty"`
 	Type       string                 `json:"type"`
 	Actor      string                 `json:"actor"`
+	Role       string                 `json:"role,omitempty"`
+	Rig        string                 `json:"rig,omitempty"`
+	Session    string                 `json:"session,omitempty"`
+	RunID      string                 `json:"run_id,omitempty"`
+	BeadID     string                 `json:"bead_id,omitempty"`
+	MRID       string                 `json:"mr_id,omitempty"`
+	ConvoyID   string                 `json:"convoy_id,omitempty"`
+	Outcome    string                 `json:"outcome,omitempty"`
+	Reason     string                 `json:"reason,omitempty"`
+	DurationMs int64                  `json:"duration_ms,omitempty"`
 	Payload    map[string]interface{} `json:"payload,omitempty"`
+	Evidence   map[string]interface{} `json:"evidence,omitempty"`
 	Visibility string                 `json:"visibility"`
 }
 
@@ -55,9 +71,9 @@ const (
 	TypeMassDeath    = "mass_death"    // Multiple sessions died in short window
 
 	// Witness patrol events
-	TypePatrolStarted   = "patrol_started"
-	TypePolecatChecked  = "polecat_checked"
-	TypePolecatNudged   = "polecat_nudged"
+	TypePatrolStarted    = "patrol_started"
+	TypePolecatChecked   = "polecat_checked"
+	TypePolecatNudged    = "polecat_nudged"
 	TypeEscalationSent   = "escalation_sent"
 	TypeEscalationAcked  = "escalation_acked"
 	TypeEscalationClosed = "escalation_closed"
@@ -80,6 +96,16 @@ const (
 	TypeRollbackStarted = "rollback_started" // Rollback sequence initiated after step failure
 	TypeRollbackStep    = "rollback_step"    // Wide event: one compensating action executed during rollback
 	TypeRollbackDone    = "rollback_done"    // Rollback sequence completed (all steps executed)
+
+	// Operator events
+	TypeDashboardCommand = "dashboard_command"
+	TypeLeaseAcquired    = "lease_acquired"
+	TypeLeaseReleased    = "lease_released"
+	TypeRespawnRecorded  = "respawn_recorded"
+	TypeRespawnBlocked   = "respawn_blocked"
+	TypeRedispatch       = "redispatch_decision"
+	TypeCleanupState     = "cleanup_transition"
+	TypeDependencyHealth = "dependency_health"
 )
 
 // EventsFile is the name of the raw events log.
@@ -89,15 +115,12 @@ const EventsFile = ".events.jsonl"
 // The event is appended to ~/gt/.events.jsonl.
 // Returns nil if logging fails (events are best-effort).
 func Log(eventType, actor string, payload map[string]interface{}, visibility string) error {
-	event := Event{
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
-		Source:     "gt",
+	return LogEvent(Event{
 		Type:       eventType,
 		Actor:      actor,
 		Payload:    payload,
 		Visibility: visibility,
-	}
-	return write(event)
+	})
 }
 
 // LogFeed is a convenience wrapper for feed-visible events.
@@ -110,22 +133,95 @@ func LogAudit(eventType, actor string, payload map[string]interface{}) error {
 	return Log(eventType, actor, payload, VisibilityAudit)
 }
 
+// PrepareEvent applies the canonical event defaults and infers common fields
+// from the actor/payload so every sink sees the same wide event.
+func PrepareEvent(event Event) Event {
+	if event.Timestamp == "" {
+		event.Timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+	if event.Source == "" {
+		event.Source = "gt"
+	}
+	if event.EventID == "" {
+		event.EventID = uuid.NewString()
+	}
+	if event.Kind == "" {
+		event.Kind = event.Type
+	}
+	if event.Type == "" {
+		event.Type = event.Kind
+	}
+	if event.Visibility == "" {
+		event.Visibility = VisibilityAudit
+	}
+	if event.Payload == nil {
+		event.Payload = map[string]interface{}{}
+	}
+	if event.Evidence == nil {
+		event.Evidence = map[string]interface{}{}
+	}
+	if event.Rig == "" {
+		event.Rig = payloadString(event.Payload, "rig")
+		if event.Rig == "" {
+			event.Rig = inferRigFromActor(event.Actor)
+		}
+	}
+	if event.Role == "" {
+		event.Role = inferRoleFromActor(event.Actor)
+	}
+	if event.Session == "" {
+		event.Session = payloadString(event.Payload, "session")
+	}
+	if event.BeadID == "" {
+		event.BeadID = firstPayloadString(event.Payload, "bead_id", "bead")
+	}
+	if event.MRID == "" {
+		event.MRID = firstPayloadString(event.Payload, "mr_id", "mr")
+	}
+	if event.ConvoyID == "" {
+		event.ConvoyID = firstPayloadString(event.Payload, "convoy_id", "convoy")
+	}
+	if event.Reason == "" {
+		event.Reason = firstPayloadString(event.Payload, "reason", "error")
+	}
+	if event.DurationMs == 0 {
+		event.DurationMs = payloadInt64(event.Payload, "duration_ms")
+	}
+	return event
+}
+
+// LogEvent writes a canonical event to the current town root.
+func LogEvent(event Event) error {
+	return writeAt("", PrepareEvent(event))
+}
+
+// LogEventAt writes a canonical event to a specific town root.
+func LogEventAt(townRoot string, event Event) error {
+	return writeAt(townRoot, PrepareEvent(event))
+}
+
 // write appends an event to the events file.
 // Uses flock for cross-process synchronization — sync.Mutex only protects
 // intra-process goroutines, but multiple gt processes write concurrently.
 func write(event Event) error {
-	// Find town root
-	townRoot, err := workspace.FindFromCwd()
-	if err != nil || townRoot == "" {
-		// Silently ignore - we're not in a Gas Town workspace
-		return nil
+	return writeAt("", PrepareEvent(event))
+}
+
+func writeAt(townRoot string, event Event) error {
+	if townRoot == "" {
+		var err error
+		townRoot, err = detectTownRoot()
+		if err != nil || townRoot == "" {
+			// Silently ignore - we're not in a Gas Town workspace
+			return nil
+		}
 	}
 
 	eventsPath := filepath.Join(townRoot, EventsFile)
 
 	// Marshal event to JSON
 	data, err := json.Marshal(event)
-	if err != nil {
+	if err != nil || townRoot == "" {
 		return fmt.Errorf("marshaling event: %w", err)
 	}
 	data = append(data, '\n')
@@ -151,7 +247,143 @@ func write(event Event) error {
 		return fmt.Errorf("closing events file: %w", err)
 	}
 
+	if store, err := controlplane.Open(townRoot); err == nil {
+		_ = store.RecordEvent(toTownEvent(event))
+	}
+
 	return nil
+}
+
+func toTownEvent(event Event) controlplane.TownEvent {
+	return controlplane.TownEvent{
+		EventID:    event.EventID,
+		Timestamp:  event.Timestamp,
+		Kind:       event.Kind,
+		Type:       event.Type,
+		Actor:      event.Actor,
+		Role:       event.Role,
+		Rig:        event.Rig,
+		Session:    event.Session,
+		RunID:      event.RunID,
+		BeadID:     event.BeadID,
+		MRID:       event.MRID,
+		ConvoyID:   event.ConvoyID,
+		Outcome:    event.Outcome,
+		Reason:     event.Reason,
+		DurationMs: event.DurationMs,
+		Payload:    event.Payload,
+		Evidence:   event.Evidence,
+		Visibility: event.Visibility,
+		Source:     event.Source,
+	}
+}
+
+func detectTownRoot() (string, error) {
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		return townRoot, nil
+	}
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if townRoot := os.Getenv(envName); townRoot != "" {
+			if ok, _ := workspace.IsWorkspace(townRoot); ok {
+				return townRoot, nil
+			}
+		}
+	}
+	return "", workspace.ErrNotFound
+}
+
+func firstPayloadString(payload map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value := payloadString(payload, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func payloadString(payload map[string]interface{}, key string) string {
+	if payload == nil {
+		return ""
+	}
+	value, ok := payload[key]
+	if !ok {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func payloadInt64(payload map[string]interface{}, key string) int64 {
+	if payload == nil {
+		return 0
+	}
+	value, ok := payload[key]
+	if !ok {
+		return 0
+	}
+	switch v := value.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case json.Number:
+		i, _ := v.Int64()
+		return i
+	default:
+		return 0
+	}
+}
+
+func inferRigFromActor(actor string) string {
+	if actor == "" {
+		return ""
+	}
+	if actor == "mayor" || actor == "deacon" || actor == "daemon" || actor == "gt" || actor == "dashboard" {
+		return ""
+	}
+	parts := splitActor(actor)
+	if len(parts) == 0 {
+		return ""
+	}
+	switch parts[0] {
+	case "mayor", "deacon", "daemon", "gt", "dashboard":
+		return ""
+	default:
+		return parts[0]
+	}
+}
+
+func inferRoleFromActor(actor string) string {
+	switch actor {
+	case "mayor", "deacon":
+		return actor
+	}
+	parts := splitActor(actor)
+	if len(parts) < 2 {
+		return ""
+	}
+	switch parts[1] {
+	case "witness", "refinery", "crew":
+		return parts[1]
+	case "polecats":
+		return "polecat"
+	default:
+		return "polecat"
+	}
+}
+
+func splitActor(actor string) []string {
+	return strings.FieldsFunc(actor, func(r rune) bool {
+		return r == '/'
+	})
 }
 
 // Payload helpers for common event structures.

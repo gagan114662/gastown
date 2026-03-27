@@ -138,15 +138,15 @@ Federated work coordination network linking Gas Towns through DoltHub. Rigs post
 # Install Gas Town
 $ brew install gastown                                    # Homebrew (recommended)
 $ npm install -g @gastown/gt                              # npm
-$ go install github.com/steveyegge/gastown/cmd/gt@latest  # From source (macOS/Linux)
-
-# Windows (or if go install fails): clone and build manually
 $ git clone https://github.com/steveyegge/gastown.git && cd gastown
+$ make install                                            # From source (preferred)
+
+# Windows: clone and build manually
 $ go build -o gt.exe ./cmd/gt
 $ mv gt.exe $HOME/go/bin/  # or add gastown to PATH
 
-# If using go install, add Go binaries to PATH (add to ~/.zshrc or ~/.bashrc)
-export PATH="$PATH:$HOME/go/bin"
+# If you build manually, add your install target to PATH as needed.
+export PATH="$PATH:$HOME/.local/bin:$HOME/go/bin"
 
 # Create workspace with git initialization
 gt install ~/gt --git
