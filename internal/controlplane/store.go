@@ -565,6 +565,11 @@ func sqliteParamValue(value interface{}) string {
 	}
 }
 
+// sqliteCLIQuotedString emits a sqlite3-shell-safe string literal for
+// `.parameter set`. The sqlite3 CLI accepts double-quoted string literals in
+// this mode, which keeps ordinary JSON/text payloads compact. If this store is
+// ever migrated away from the sqlite3 CLI to a Go driver, revisit this helper
+// because drivers may enforce stricter SQL string-literal rules.
 func sqliteCLIQuotedString(value string) string {
 	var out strings.Builder
 	out.Grow(len(value) + 2)
