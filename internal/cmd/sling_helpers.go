@@ -18,6 +18,7 @@ import (
 	"github.com/steveyegge/gastown/internal/cli"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/ctxstack"
 	"github.com/steveyegge/gastown/internal/daemon"
 	"github.com/steveyegge/gastown/internal/formula"
 	rigpkg "github.com/steveyegge/gastown/internal/rig"
@@ -1265,14 +1266,14 @@ func lookupPriorAttempt(beadsDir, issueID string) []string {
 	bd := beads.New(beadsDir)
 	mrs, err := bd.FindOpenMRsForIssue(issueID)
 	if err != nil || len(mrs) == 0 {
-		return nil
+		return lookupPriorSummary(issueID, nil)
 	}
 
 	// Use the most recent MR (last in list) as the prior attempt.
 	prior := mrs[len(mrs)-1]
 	fields := beads.ParseMRFields(prior)
 	if fields == nil || fields.Branch == "" {
-		return nil
+		return lookupPriorSummary(issueID, nil)
 	}
 
 	vars := []string{
@@ -1281,5 +1282,32 @@ func lookupPriorAttempt(beadsDir, issueID string) []string {
 	if fields.CloseReason != "" {
 		vars = append(vars, fmt.Sprintf("prior_failure=%s", fields.CloseReason))
 	}
-	return vars
+	return lookupPriorSummary(issueID, vars)
+}
+
+func lookupPriorSummary(issueID string, base []string) []string {
+	townRoot := detectTownRootFromCwd()
+	if townRoot == "" {
+		return base
+	}
+	store, err := openContextStore(townRoot)
+	if err != nil {
+		return base
+	}
+	summaries, err := store.ListSessionSummaries(ctxstack.SummaryFilter{
+		WorkBead: issueID,
+		Limit:    1,
+	})
+	if err != nil || len(summaries) == 0 {
+		return base
+	}
+	summary := strings.Join(strings.Fields(strings.TrimSpace(summaries[0].Summary)), " ")
+	if summary == "" {
+		return base
+	}
+	if len(summary) > 180 {
+		summary = summary[:177] + "..."
+	}
+	base = append(base, fmt.Sprintf("prior_summary=%s", summary))
+	return base
 }

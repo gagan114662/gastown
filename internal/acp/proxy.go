@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/ctxstack"
 	"github.com/steveyegge/gastown/internal/style"
 )
 
@@ -523,6 +524,7 @@ func (p *Proxy) forwardFromAgent() {
 		// Filter out redacted thought chunks - they shouldn't be shown to the UI
 		// as they create a confusing "Thinking" state when the agent has finished
 		if isRedactedThought(&msg) {
+			p.recordScratchpadMarker("acp_redacted_thought", "[REDACTED]")
 			debugLog(p.townRoot, "[Proxy] forwardFromAgent: filtering out redacted thought chunk")
 			continue
 		}
@@ -545,6 +547,21 @@ func (p *Proxy) forwardFromAgent() {
 			}
 		}
 	}
+}
+
+func (p *Proxy) recordScratchpadMarker(kind, text string) {
+	if p == nil || p.townRoot == "" || p.sessionID == "" {
+		return
+	}
+	store, err := ctxstack.Open(p.townRoot)
+	if err != nil {
+		return
+	}
+	_ = store.AddScratchpadEntry(ctxstack.ScratchpadEntry{
+		SessionID: p.sessionID,
+		Kind:      kind,
+		Text:      text,
+	})
 }
 
 func (p *Proxy) forwardAgentStderr() {

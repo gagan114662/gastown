@@ -342,6 +342,7 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		issueID = info.Issue
 	}
 	worker := info.Worker
+	var doneErrors []string
 
 	// Determine polecat name from sender detection
 	sender := detectSender()
@@ -349,6 +350,34 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	if parts := strings.Split(sender, "/"); len(parts) >= 2 {
 		polecatName = parts[len(parts)-1]
 	}
+	defer func() {
+		body := strings.TrimSpace(fmt.Sprintf(
+			"Branch: %s\nIssue: %s\nExit: %s\nCleanup: %s\nWorker: %s",
+			branch,
+			issueID,
+			exitType,
+			doneCleanupStatus,
+			worker,
+		))
+		if len(doneErrors) > 0 {
+			body += "\n\nWarnings: " + strings.Join(doneErrors, "; ")
+		}
+		if retErr != nil {
+			body += "\n\nError: " + retErr.Error()
+		}
+		_ = recordContextSummary(
+			townRoot,
+			string(RolePolecat),
+			rigName,
+			sender,
+			currentContextSessionID(),
+			issueID,
+			"done_"+strings.ToLower(exitType),
+			body,
+			"done",
+			strings.ToLower(exitType),
+		)
+	}()
 
 	// Get agent bead ID for cross-referencing
 	var agentBeadID string
@@ -412,7 +441,6 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 	var mrID string
 	var pushFailed bool
 	var mrFailed bool
-	var doneErrors []string
 	var convoyInfo *ConvoyInfo // Populated if issue is tracked by a convoy
 	if exitType == ExitCompleted {
 		if branch == defaultBranch || branch == "master" {

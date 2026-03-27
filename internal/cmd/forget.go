@@ -48,6 +48,11 @@ func runForget(cmd *cobra.Command, args []string) error {
 			if err := bdKvClear(fullKey); err != nil {
 				return fmt.Errorf("removing memory: %w", err)
 			}
+			if townRoot := detectTownRootFromCwd(); townRoot != "" {
+				if store, err := openContextStore(townRoot); err == nil {
+					_ = deleteMemoryContextDoc(store, memType, shortKey)
+				}
+			}
 			fmt.Printf("%s Forgot memory: %s\n", style.Success.Render("✓"), style.Bold.Render(key))
 			return nil
 		}
@@ -60,6 +65,11 @@ func runForget(cmd *cobra.Command, args []string) error {
 		if existing != "" {
 			if err := bdKvClear(fullKey); err != nil {
 				return fmt.Errorf("removing memory: %w", err)
+			}
+			if townRoot := detectTownRootFromCwd(); townRoot != "" {
+				if store, err := openContextStore(townRoot); err == nil {
+					_ = deleteMemoryContextDoc(store, t, key)
+				}
 			}
 			displayKey := key
 			if t != "general" {
@@ -79,6 +89,11 @@ func runForget(cmd *cobra.Command, args []string) error {
 
 	if err := bdKvClear(fullKey); err != nil {
 		return fmt.Errorf("removing memory: %w", err)
+	}
+	if townRoot := detectTownRootFromCwd(); townRoot != "" {
+		if store, err := openContextStore(townRoot); err == nil {
+			_ = deleteMemoryContextDoc(store, "general", key)
+		}
 	}
 
 	fmt.Printf("%s Forgot memory: %s\n", style.Success.Render("✓"), style.Bold.Render(key))

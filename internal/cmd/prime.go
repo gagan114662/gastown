@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/cli"
+	"github.com/steveyegge/gastown/internal/ctxstack"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/state"
 	"github.com/steveyegge/gastown/internal/style"
@@ -203,7 +204,7 @@ func runPrime(cmd *cobra.Command, args []string) (retErr error) {
 
 	outputMoleculeContext(ctx)
 	outputCheckpointContext(ctx)
-	runPrimeExternalTools(cwd)
+	runPrimeExternalTools(ctx, cwd, hookedBead)
 
 	if ctx.Role == RoleMayor {
 		checkPendingEscalations(ctx)
@@ -304,7 +305,7 @@ func handlePrimeHookMode(townRoot, cwd string) {
 	// WaitForCommand polls for this instead of probing the process tree.
 	// This handles agents wrapped in shell scripts where pane_current_command
 	// remains "bash" even though the agent is running as a descendant.
-	signalAgentReady()
+	signalAgentReady(sessionID)
 
 	// Store source for compact/resume detection in runPrime
 	primeHookSource = source
@@ -336,13 +337,16 @@ func hookSessionBeaconLines(sessionID, source string) []string {
 // probing the process tree via IsAgentAlive.
 // Uses ResolveCurrentSession to find our session on the town socket — raw
 // exec.Command("tmux", ...) would use the default socket and miss the gastown server.
-func signalAgentReady() {
+func signalAgentReady(sessionID string) {
 	t := tmux.NewTmux()
 	name, err := t.ResolveCurrentSession()
 	if err != nil || name == "" {
 		return
 	}
 	_ = t.SetEnvironment(name, tmux.EnvAgentReady, "1")
+	if sessionID != "" {
+		_ = t.SetEnvironment(name, "GT_SESSION_ID", sessionID)
+	}
 }
 
 // isCompactResume returns true if the current prime is running after compaction or resume.
@@ -413,15 +417,15 @@ func outputRoleContext(ctx RoleContext) (string, error) {
 
 // runPrimeExternalTools runs bd prime, memory injection, and gt mail check --inject.
 // Skipped in dry-run mode with explain output.
-func runPrimeExternalTools(cwd string) {
+func runPrimeExternalTools(ctx RoleContext, cwd string, hookedBead *beads.Issue) {
 	if primeDryRun {
 		explain(true, "bd prime: skipped in dry-run mode")
-		explain(true, "memory injection: skipped in dry-run mode")
+		explain(true, "context stack injection: skipped in dry-run mode")
 		explain(true, "gt mail check --inject: skipped in dry-run mode")
 		return
 	}
 	runBdPrime(cwd)
-	runMemoryInject()
+	runMemoryInject(ctx, hookedBead)
 	runMailCheckInject(cwd)
 }
 
@@ -457,13 +461,44 @@ var memoryTypeLabels = map[string]string{
 	"feedback":  "Behavioral Rules (from user feedback)",
 	"user":      "User Context",
 	"project":   "Project Context",
-	"reference":  "Reference Links",
+	"reference": "Reference Links",
 	"general":   "General",
 }
 
-// runMemoryInject loads memories from beads kv and outputs them during prime.
-// Memories are grouped by type and ordered by priority (feedback first).
-func runMemoryInject() {
+// runMemoryInject loads ranked warm/cold context from the shared context stack.
+// Typed memories remain in beads KV as the source of truth, but are mirrored into
+// the lexical retrieval index on demand before searching.
+func runMemoryInject(ctx RoleContext, hookedBead *beads.Issue) {
+	store, err := openContextStore(ctx.TownRoot)
+	if err != nil {
+		return
+	}
+	if err := syncContextMemories(store); err != nil {
+		return
+	}
+
+	settings := loadContextSettings(ctx.TownRoot, ctx.Rig)
+	caps := resolveRuntimeContextCapabilities(ctx.TownRoot, ctx.Rig, string(ctx.Role))
+	snapshot, err := store.BuildPrimeSnapshot(ctxstack.PrimeRequest{
+		SessionID: currentContextSessionID(),
+		Role:      string(ctx.Role),
+		Rig:       ctx.Rig,
+		Agent:     currentContextAgent(),
+		WorkBead:  beadIDOrEmpty(hookedBead),
+		Query:     buildPrimeQuery(ctx, hookedBead),
+		MaxItems:  6,
+	}, settings, caps)
+	if err == nil {
+		if rendered := renderPrimeSnapshot(snapshot); strings.TrimSpace(rendered) != "" {
+			fmt.Println(rendered)
+			if snapshot.PrimarySummary != nil || len(snapshot.Docs) > 0 || len(snapshot.Recent) > 0 {
+				return
+			}
+		}
+	}
+
+	// Preserve the old memory section as a fallback surface for rigs that only
+	// use typed memories and have not produced summaries yet.
 	kvs, err := bdKvListJSON()
 	if err != nil {
 		return // Silently skip if kv list fails
@@ -512,6 +547,13 @@ func runMemoryInject() {
 			fmt.Printf("- **%s**: %s\n", m.shortKey, m.value)
 		}
 	}
+}
+
+func beadIDOrEmpty(issue *beads.Issue) string {
+	if issue == nil {
+		return ""
+	}
+	return issue.ID
 }
 
 // runMailCheckInject runs `gt mail check --inject` and outputs the result.

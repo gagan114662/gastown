@@ -2275,6 +2275,16 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		}
 	}
 
+	if rc.Context != nil {
+		result.Context = &RuntimeContextConfig{
+			NativeContextUsage: rc.Context.NativeContextUsage,
+			HookSummaries:      rc.Context.HookSummaries,
+			Scratchpad:         rc.Context.Scratchpad,
+			EntropySignals:     rc.Context.EntropySignals,
+			MaxContextTokens:   rc.Context.MaxContextTokens,
+		}
+	}
+
 	// Deep copy ACP config
 	if rc.ACP != nil {
 		result.ACP = &ACPConfig{
@@ -2341,6 +2351,16 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 	if result.Instructions == nil && preset != nil && preset.InstructionsFile != "" {
 		result.Instructions = &RuntimeInstructionsConfig{
 			File: preset.InstructionsFile,
+		}
+	}
+
+	if result.Context == nil && preset != nil && preset.Context != nil {
+		result.Context = &RuntimeContextConfig{
+			NativeContextUsage: preset.Context.NativeContextUsage,
+			HookSummaries:      preset.Context.HookSummaries,
+			Scratchpad:         preset.Context.Scratchpad,
+			EntropySignals:     preset.Context.EntropySignals,
+			MaxContextTokens:   preset.Context.MaxContextTokens,
 		}
 	}
 

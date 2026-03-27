@@ -155,6 +155,9 @@ type AgentPresetInfo struct {
 	// ACP is the configuration for ACP (Agent Communication Protocol) support.
 	// nil means the agent does not support ACP.
 	ACP *ACPConfig `json:"acp,omitempty"`
+
+	// Context describes runtime fidelity for the shared context stack.
+	Context *RuntimeContextConfig `json:"context,omitempty"`
 }
 
 // ACPConfig contains configuration for ACP (Agent Communication Protocol) support.
@@ -237,6 +240,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		InstructionsFile:       "CLAUDE.md",
 		EmitsPermissionWarning: true,
 		HasTurnBoundaryDrain:   true,
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
+		},
 	},
 	AgentGemini: {
 		Name:                AgentGemini,
@@ -261,6 +268,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ReadyDelayMs:         5000,
 		InstructionsFile:     "AGENTS.md",
 		EscapeCancelsRequest: true, // Gemini CLI uses Escape to abort active generation
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
+		},
 	},
 	AgentCodex: {
 		Name:                AgentCodex,
@@ -281,6 +292,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ReadyPromptPrefix: "› ",
 		ReadyDelayMs:      3000,
 		InstructionsFile:  "AGENTS.md",
+		Context: &RuntimeContextConfig{
+			Scratchpad: true,
+		},
 	},
 	AgentCursor: {
 		Name:                AgentCursor,
@@ -303,6 +317,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksDir:          ".cursor",
 		HooksSettingsFile: "hooks.json",
 		InstructionsFile:  "AGENTS.md",
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
+		},
 	},
 	AgentAuggie: {
 		Name:                AgentAuggie,
@@ -317,6 +335,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		// Runtime defaults
 		PromptMode:       "arg",
 		InstructionsFile: "AGENTS.md",
+		Context: &RuntimeContextConfig{
+			Scratchpad: true,
+		},
 	},
 	AgentAmp: {
 		Name:                AgentAmp,
@@ -331,6 +352,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		// Runtime defaults
 		PromptMode:       "arg",
 		InstructionsFile: "AGENTS.md",
+		Context: &RuntimeContextConfig{
+			Scratchpad: true,
+		},
 	},
 	AgentOpenCode: {
 		Name:    AgentOpenCode,
@@ -358,6 +382,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		HooksSettingsFile: "gastown.js",
 		ReadyDelayMs:      8000,
 		InstructionsFile:  "AGENTS.md",
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
+		},
 		// ACP support
 		ACP: &ACPConfig{
 			Command: "acp",
@@ -388,6 +416,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		ReadyPromptPrefix:  "",   // GA: no ❯ prompt; Copilot uses hint text, not a detectable prefix
 		ReadyDelayMs:       5000, // Delay-based readiness detection (no prompt prefix)
 		InstructionsFile:   "AGENTS.md",
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
+		},
 	},
 	AgentPi: {
 		Name:                AgentPi,
@@ -411,6 +443,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		// arrives before the TUI is ready and gets dropped silently.
 		PromptMode:   "arg",
 		ReadyDelayMs: 8000,
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
+		},
 	},
 	AgentOmp: {
 		Name:                AgentOmp,
@@ -425,6 +461,10 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			PromptFlag: "--prompt",
+		},
+		Context: &RuntimeContextConfig{
+			HookSummaries: true,
+			Scratchpad:    true,
 		},
 	},
 }
@@ -585,6 +625,10 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		Command:  info.Command,
 		Args:     append([]string(nil), info.Args...), // Copy to avoid mutation
 		Env:      envCopy,
+	}
+	if info.Context != nil {
+		ctxCopy := *info.Context
+		rc.Context = &ctxCopy
 	}
 
 	// Resolve command path for claude preset (handles alias installations)

@@ -2,8 +2,8 @@
 package session
 
 import (
-	"github.com/steveyegge/gastown/internal/cli"
 	"fmt"
+	"github.com/steveyegge/gastown/internal/cli"
 	"time"
 )
 
@@ -89,6 +89,7 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 	// come as a separate nudge after gt prime completes.
 	if cfg.IncludePrimeInstruction {
 		beacon += "\n\nRun `" + cli.Name() + " prime` to initialize your context."
+		beacon += "\nUse `" + cli.Name() + " scratchpad append ...` for hidden session notes if needed."
 		// Don't add work instructions here - they come as a delayed nudge after gt prime
 		return beacon
 	}
@@ -109,6 +110,7 @@ func FormatStartupBeacon(cfg BeaconConfig) string {
 	// Exclude work instructions only if explicitly set (non-hook agents get them via delayed nudge)
 	if cfg.Topic == "assigned" && !cfg.ExcludeWorkInstructions {
 		beacon += "\n\nRun `" + cli.Name() + " prime --hook` and begin work on your hook."
+		beacon += "\nUse `" + cli.Name() + " scratchpad append ...` if you need a private scratch area."
 	}
 
 	return beacon

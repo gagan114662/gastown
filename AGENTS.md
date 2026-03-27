@@ -208,3 +208,26 @@ The Witness runs `./scripts/ci/smoke.sh` after every merge. If it fails, a P0 bu
 
 <!-- end-gastown-quality-contract -->
 
+<!-- gastown-agent-ci-v1 -->
+
+---
+
+## Debugging CI Failures with agent-ci
+
+When a CI gate fails, use **agent-ci** to reproduce the exact Docker environment, pause at the failure, and retry from that step — no full rebuild required.
+
+| Task | Command |
+|------|---------|
+| Run all CI jobs locally | `./scripts/ci/agent-ci-run.sh` |
+| Run one job | `./scripts/ci/agent-ci-run.sh --job test` |
+| Retry from failed step | `npx @redwoodjs/agent-ci@latest retry --name <name>` |
+| Kill paused container | `npx @redwoodjs/agent-ci@latest abort --name <name>` |
+
+**Requirements:** Docker running, Node.js ≥ 22
+
+**One-time setup:** `cp .env.agent-ci.example .env.agent-ci`
+
+See `skills/agent-ci/SKILL.md` for full documentation.
+
+<!-- end-gastown-agent-ci -->
+
