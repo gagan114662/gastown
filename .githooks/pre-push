@@ -26,6 +26,29 @@ fi
 #   polecat/*                     - Polecat working branches (Refinery merges these)
 #   integration/*                 - Integration branches (created by gt mq integration)
 
+# Run CI gate for polecat/* branches before push reaches GitHub.
+# Set GT_SKIP_CI=1 to bypass (emergency only).
+run_ci_gate() {
+  local branch="$1"
+  [[ "$branch" == polecat/* ]] || return 0
+  [[ "$GT_SKIP_CI" == "1" ]] && { echo "WARNING: CI gate skipped (GT_SKIP_CI=1)"; return 0; }
+
+  echo "Running CI gate before push (branch: $branch)..."
+  local script
+  script="$(git rev-parse --show-toplevel)/scripts/ci/agent-ci-gate.sh"
+  if [[ ! -x "$script" ]]; then
+    echo "ERROR: CI gate script not found or not executable: $script"
+    exit 1
+  fi
+  if ! "$script"; then
+    echo ""
+    echo "BLOCKED: CI gate failed. Fix CI before pushing."
+    echo "To bypass in an emergency: GT_SKIP_CI=1 git push"
+    exit 1
+  fi
+  echo "CI gate passed."
+}
+
 while read local_ref local_sha remote_ref remote_sha; do
   # Skip tags - they're allowed for releases
   if [[ "$remote_ref" == refs/tags/* ]]; then
@@ -37,6 +60,7 @@ while read local_ref local_sha remote_ref remote_sha; do
   case "$branch" in
     "${default_branch}"|beads-sync|polecat/*|integration/*)
       # Allowed branches
+      run_ci_gate "$branch"
       ;;
     *)
       # Allow feature branches when contributing to upstream (fork workflow).

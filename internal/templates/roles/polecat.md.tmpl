@@ -308,6 +308,19 @@ git status              # Must be clean (no uncommitted changes)
 git log --oneline -3    # Verify your commits are present
 ```
 
+**CI gate (mandatory for polecat branches):**
+
+```bash
+./scripts/ci/agent-ci-gate.sh   # Must pass before push
+```
+
+If it fails: fix the failure, commit, and re-run. **After 3 failed attempts, stop
+and escalate** — do NOT keep looping:
+
+```bash
+gt escalate "CI gate failing after 3 attempts" -s HIGH -m "Failures: <paste output>"
+```
+
 Then submit: **`{{ cmd }} done`** ← MANDATORY FINAL STEP
 
 This single command verifies git is clean and submits your branch to the merge
