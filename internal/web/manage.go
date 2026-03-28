@@ -6,12 +6,15 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/steveyegge/gastown/internal/chromadb"
 )
 
 // ManageHandler handles management API requests at /api/manage/.
 type ManageHandler struct {
-	csrfToken string
-	gtPath    string
+	csrfToken    string
+	gtPath       string
+	chromaClient *chromadb.Client // nil if Chroma not running
 }
 
 // NewManageHandler creates a new management API handler.
@@ -19,7 +22,13 @@ func NewManageHandler(csrfToken, gtPath string) *ManageHandler {
 	if gtPath == "" {
 		gtPath = "gt"
 	}
-	return &ManageHandler{csrfToken: csrfToken, gtPath: gtPath}
+	h := &ManageHandler{csrfToken: csrfToken, gtPath: gtPath}
+	// Try to connect to Chroma; leave nil if not available.
+	c := chromadb.NewClient("http://localhost:8000")
+	if c.Ping() == nil {
+		h.chromaClient = c
+	}
+	return h
 }
 
 // ServeHTTP routes management API requests.
@@ -151,12 +160,26 @@ func (h *ManageHandler) handleMemorySearch(w http.ResponseWriter, r *http.Reques
 		h.sendError(w, "q parameter required", http.StatusBadRequest)
 		return
 	}
-	// Placeholder — wired to Chroma in Task 14.
+	if h.chromaClient == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"transcripts": []any{},
+			"beads":       []any{},
+			"docs":        []any{},
+			"error":       "Chroma not running",
+		})
+		return
+	}
+	results, err := chromadb.QueryContext(h.chromaClient, q)
+	if err != nil {
+		h.sendError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"transcripts": []any{},
-		"beads":       []any{},
-		"docs":        []any{},
+		"transcripts": results.Transcripts,
+		"beads":       results.Beads,
+		"docs":        results.Docs,
 	})
 }
 
