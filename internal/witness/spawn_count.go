@@ -8,7 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/config"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/lock"
 	"github.com/steveyegge/gastown/internal/workspace"
 )
@@ -84,9 +87,8 @@ func ShouldBlockRespawn(workDir, beadID string) bool {
 		defer unlock()
 	}
 
-	state := loadBeadRespawnState(townRoot)
-	rec, ok := state.Beads[beadID]
-	if !ok {
+	rec, _ := loadMergedRespawnRecord(townRoot, beadID)
+	if rec == nil {
 		return false
 	}
 	return rec.Count >= maxRespawns
@@ -114,15 +116,44 @@ func RecordBeadRespawn(workDir, beadID string) int {
 		defer unlock()
 	}
 
-	state := loadBeadRespawnState(townRoot)
-	rec, ok := state.Beads[beadID]
-	if !ok {
+	rec, store := loadMergedRespawnRecord(townRoot, beadID)
+	if rec == nil {
 		rec = &beadRespawnRecord{BeadID: beadID}
-		state.Beads[beadID] = rec
 	}
 	rec.Count++
 	rec.LastRespawn = time.Now().UTC()
-	_ = saveBeadRespawnState(townRoot, state) // Non-fatal: tracking failure must not block respawn
+	persistRespawnProjection(townRoot, rec)
+	if store != nil {
+		rigName := rigForBead(townRoot, beadID)
+		_ = store.UpsertRespawnCounter(controlplane.RespawnCounter{
+			BeadID:      beadID,
+			Rig:         rigName,
+			Count:       rec.Count,
+			MaxCount:    config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV(),
+			LastRespawn: rec.LastRespawn.Format(time.RFC3339),
+			Blocked:     rec.Count >= config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV(),
+			UpdatedAt:   rec.LastRespawn.Format(time.RFC3339),
+			Evidence: map[string]interface{}{
+				"projection_file": beadRespawnStateFile(townRoot),
+				"source":          "witness",
+			},
+		})
+	}
+	_ = events.LogEventAt(townRoot, events.Event{
+		Kind:       events.TypeRespawnRecorded,
+		Type:       events.TypeRespawnRecorded,
+		Actor:      witnessActor(townRoot, beadID),
+		Role:       "witness",
+		Rig:        rigForBead(townRoot, beadID),
+		BeadID:     beadID,
+		Outcome:    "success",
+		Visibility: events.VisibilityAudit,
+		Payload: map[string]interface{}{
+			"count":      rec.Count,
+			"max_count":  config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV(),
+			"state_file": beadRespawnStateFile(townRoot),
+		},
+	})
 	return rec.Count
 }
 
@@ -145,5 +176,116 @@ func ResetBeadRespawnCount(workDir, beadID string) error {
 
 	state := loadBeadRespawnState(townRoot)
 	delete(state.Beads, beadID)
-	return saveBeadRespawnState(townRoot, state)
+	if err := saveBeadRespawnState(townRoot, state); err != nil {
+		return err
+	}
+	if store, err := controlplane.Open(townRoot); err == nil {
+		_ = store.DeleteRespawnCounter(beadID)
+	}
+	return nil
+}
+
+func loadMergedRespawnRecord(townRoot, beadID string) (*beadRespawnRecord, *controlplane.Store) {
+	state := loadBeadRespawnState(townRoot)
+	var fileRec *beadRespawnRecord
+	if state != nil && state.Beads != nil {
+		if rec, ok := state.Beads[beadID]; ok {
+			copyRec := *rec
+			fileRec = &copyRec
+		}
+	}
+
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		return fileRec, nil
+	}
+
+	cpRec, err := store.GetRespawnCounter(beadID)
+	if err != nil || cpRec == nil {
+		if fileRec != nil {
+			_ = store.UpsertRespawnCounter(controlplane.RespawnCounter{
+				BeadID:      beadID,
+				Rig:         rigForBead(townRoot, beadID),
+				Count:       fileRec.Count,
+				MaxCount:    config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV(),
+				LastRespawn: fileRec.LastRespawn.Format(time.RFC3339),
+				Blocked:     fileRec.Count >= config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV(),
+				UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+				Evidence: map[string]interface{}{
+					"projection_file": beadRespawnStateFile(townRoot),
+					"migrated":        true,
+				},
+			})
+		}
+		return fileRec, store
+	}
+
+	merged := &beadRespawnRecord{
+		BeadID:      beadID,
+		Count:       cpRec.Count,
+		LastRespawn: parseMaybeRFC3339(cpRec.LastRespawn),
+	}
+	if fileRec != nil && (fileRec.Count > merged.Count || (fileRec.Count == merged.Count && fileRec.LastRespawn.After(merged.LastRespawn))) {
+		merged.Count = fileRec.Count
+		merged.LastRespawn = fileRec.LastRespawn
+	}
+
+	_ = store.UpsertRespawnCounter(controlplane.RespawnCounter{
+		BeadID:      beadID,
+		Rig:         rigForBead(townRoot, beadID),
+		Count:       merged.Count,
+		MaxCount:    max(cpRec.MaxCount, config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV()),
+		LastRespawn: merged.LastRespawn.Format(time.RFC3339),
+		Blocked:     merged.Count >= config.LoadOperationalConfig(townRoot).GetWitnessConfig().MaxBeadRespawnsV(),
+		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+		Evidence: map[string]interface{}{
+			"projection_file": beadRespawnStateFile(townRoot),
+			"source":          "reconciled",
+		},
+	})
+	persistRespawnProjection(townRoot, merged)
+	return merged, store
+}
+
+func persistRespawnProjection(townRoot string, rec *beadRespawnRecord) {
+	state := loadBeadRespawnState(townRoot)
+	if state.Beads == nil {
+		state.Beads = make(map[string]*beadRespawnRecord)
+	}
+	copyRec := *rec
+	state.Beads[rec.BeadID] = &copyRec
+	_ = saveBeadRespawnState(townRoot, state)
+}
+
+func parseMaybeRFC3339(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+func rigForBead(townRoot, beadID string) string {
+	prefix := beads.ExtractPrefix(beadID)
+	if prefix == "" {
+		return ""
+	}
+	return beads.GetRigNameForPrefix(townRoot, prefix)
+}
+
+func witnessActor(townRoot, beadID string) string {
+	if rig := rigForBead(townRoot, beadID); rig != "" {
+		return fmt.Sprintf("%s/witness", rig)
+	}
+	return "witness"
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

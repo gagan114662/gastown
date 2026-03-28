@@ -68,6 +68,9 @@ var beadsExemptCommands = map[string]bool{
 	"summaries":     true,
 	"scratchpad":    true,
 	"entropy":       true,
+	"inspect":       true,
+	"events":        true,
+	"incidents":     true,
 	"signal":        true, // Hook signal handlers must be fast, handle beads internally
 	"metrics":       true, // Metrics reads local JSONL, no beads needed
 	"krc":           true, // KRC doesn't require beads
@@ -87,6 +90,9 @@ var branchCheckExemptCommands = map[string]bool{
 	"install":    true, // Initial setup
 	"git-init":   true, // Git setup
 	"upgrade":    true, // Post-install migration
+	"inspect":    true,
+	"events":     true,
+	"incidents":  true,
 }
 
 // persistentPreRun runs before every command.

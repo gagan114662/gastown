@@ -12,10 +12,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/constants"
+	"github.com/steveyegge/gastown/internal/controlplane"
+	"github.com/steveyegge/gastown/internal/events"
 	"github.com/steveyegge/gastown/internal/git"
 	"github.com/steveyegge/gastown/internal/runtime"
 	"github.com/steveyegge/gastown/internal/telemetry"
 	"github.com/steveyegge/gastown/internal/tmux"
+	"github.com/steveyegge/gastown/internal/workspace"
 )
 
 // SessionConfig describes how to create and start a tmux session.
@@ -301,6 +304,9 @@ func StartSession(t *tmux.Tmux, cfg SessionConfig) (_ *StartResult, retErr error
 	// Done after session creation so we only emit on success.
 	RecordAgentInstantiateFromDir(ctx, runID, runtimeConfig.ResolvedAgent,
 		cfg.Role, cfg.AgentName, cfg.SessionID, cfg.RigName, cfg.TownRoot, "", cfg.WorkDir)
+	if err := recordSessionLifecycleStart(cfg, runID, runtimeConfig); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to record session start for %s: %v\n", cfg.SessionID, err)
+	}
 
 	return &StartResult{RuntimeConfig: runtimeConfig, RunID: runID}, nil
 }
@@ -361,6 +367,9 @@ func StopSession(t *tmux.Tmux, sessionID string, graceful bool) error {
 
 	if err := t.KillSessionWithProcesses(sessionID); err != nil {
 		return fmt.Errorf("killing session: %w", err)
+	}
+	if err := recordSessionLifecycleStop(sessionID, graceful); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to record session stop for %s: %v\n", sessionID, err)
 	}
 
 	return nil
@@ -466,4 +475,183 @@ func buildCommand(cfg SessionConfig, prompt string) (string, error) {
 // Some roles use this instead of the runtime's ready delay.
 func ShutdownDelay() time.Duration {
 	return constants.ShutdownNotifyDelay
+}
+
+func recordSessionLifecycleStart(cfg SessionConfig, runID string, runtimeConfig *config.RuntimeConfig) error {
+	if cfg.TownRoot == "" {
+		return nil
+	}
+
+	event := events.PrepareEvent(events.Event{
+		Type:       events.TypeSessionStart,
+		Kind:       events.TypeSessionStart,
+		Actor:      sessionLifecycleActor(cfg.Role, cfg.RigName, cfg.AgentName, cfg.SessionID),
+		Role:       cfg.Role,
+		Rig:        cfg.RigName,
+		Session:    cfg.SessionID,
+		RunID:      runID,
+		Outcome:    "success",
+		Visibility: events.VisibilityBoth,
+		Payload: map[string]interface{}{
+			"work_dir":   cfg.WorkDir,
+			"agent_name": cfg.AgentName,
+			"session":    cfg.SessionID,
+			"role":       cfg.Role,
+		},
+		Evidence: map[string]interface{}{
+			"runtime_agent": runtimeAgentName(runtimeConfig),
+		},
+	})
+	if err := events.LogEventAt(cfg.TownRoot, event); err != nil {
+		return err
+	}
+
+	store, err := controlplane.Open(cfg.TownRoot)
+	if err != nil {
+		return err
+	}
+
+	return store.UpsertAgentRuntime(controlplane.AgentRuntimeRecord{
+		AgentID:         cfg.SessionID,
+		Role:            cfg.Role,
+		Rig:             cfg.RigName,
+		AgentName:       cfg.AgentName,
+		Session:         cfg.SessionID,
+		RunID:           runID,
+		WorkDir:         cfg.WorkDir,
+		Status:          "running",
+		StatusReason:    "session started",
+		SourceAgreement: "legacy-shadow",
+		LastEventID:     event.EventID,
+		LastEventKind:   event.Kind,
+		LastEventTS:     event.Timestamp,
+		UpdatedAt:       event.Timestamp,
+	})
+}
+
+func recordSessionLifecycleStop(sessionID string, graceful bool) error {
+	townRoot, err := lifecycleTownRoot()
+	if err != nil || townRoot == "" {
+		return nil
+	}
+
+	store, err := controlplane.Open(townRoot)
+	if err != nil {
+		return err
+	}
+
+	record, err := store.GetAgentRuntime(sessionID)
+	if err != nil {
+		return err
+	}
+
+	role, rig, agentName := "", "", ""
+	actor := sessionID
+	if record != nil {
+		role = record.Role
+		rig = record.Rig
+		agentName = record.AgentName
+		actor = sessionLifecycleActor(role, rig, agentName, sessionID)
+	} else if identity, parseErr := ParseSessionName(sessionID); parseErr == nil {
+		role = string(identity.Role)
+		rig = identity.Rig
+		agentName = identity.Name
+		actor = sessionLifecycleActor(role, rig, agentName, sessionID)
+	}
+
+	event := events.PrepareEvent(events.Event{
+		Type:       events.TypeSessionEnd,
+		Kind:       events.TypeSessionEnd,
+		Actor:      actor,
+		Role:       role,
+		Rig:        rig,
+		Session:    sessionID,
+		Outcome:    "success",
+		Visibility: events.VisibilityBoth,
+		Payload: map[string]interface{}{
+			"graceful": graceful,
+			"session":  sessionID,
+		},
+	})
+	if err := events.LogEventAt(townRoot, event); err != nil {
+		return err
+	}
+
+	next := controlplane.AgentRuntimeRecord{
+		AgentID:         sessionID,
+		Role:            role,
+		Rig:             rig,
+		AgentName:       agentName,
+		Session:         sessionID,
+		Status:          "stopped",
+		StatusReason:    "session stopped",
+		SourceAgreement: "legacy-shadow",
+		LastEventID:     event.EventID,
+		LastEventKind:   event.Kind,
+		LastEventTS:     event.Timestamp,
+		UpdatedAt:       event.Timestamp,
+	}
+	if record != nil {
+		next.RunID = record.RunID
+		next.WorkDir = record.WorkDir
+	}
+	UntrackPID(townRoot, sessionID)
+	return store.UpsertAgentRuntime(next)
+}
+
+func lifecycleTownRoot() (string, error) {
+	if townRoot, err := workspace.FindFromCwd(); err == nil && townRoot != "" {
+		return townRoot, nil
+	}
+	for _, envName := range []string{"GT_TOWN_ROOT", "GT_ROOT"} {
+		if townRoot := os.Getenv(envName); townRoot != "" {
+			if ok, _ := workspace.IsWorkspace(townRoot); ok {
+				return townRoot, nil
+			}
+		}
+	}
+	return "", workspace.ErrNotFound
+}
+
+func runtimeAgentName(runtimeConfig *config.RuntimeConfig) string {
+	if runtimeConfig == nil {
+		return ""
+	}
+	return runtimeConfig.ResolvedAgent
+}
+
+func sessionLifecycleActor(role, rig, agentName, sessionID string) string {
+	switch role {
+	case string(RoleMayor):
+		return "mayor"
+	case string(RoleDeacon):
+		if agentName == "boot" {
+			return "deacon/boot"
+		}
+		return "deacon"
+	case string(RoleWitness):
+		if rig != "" {
+			return rig + "/witness"
+		}
+	case string(RoleRefinery):
+		if rig != "" {
+			return rig + "/refinery"
+		}
+	case string(RoleCrew):
+		if rig != "" && agentName != "" {
+			return rig + "/crew/" + agentName
+		}
+	case string(RolePolecat):
+		if rig != "" && agentName != "" {
+			return rig + "/polecats/" + agentName
+		}
+	case string(RoleDog):
+		if agentName != "" {
+			return "dog/" + agentName
+		}
+	}
+	if sessionID != "" {
+		return sessionID
+	}
+	return role
 }

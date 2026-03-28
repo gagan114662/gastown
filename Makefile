@@ -1,7 +1,6 @@
-.PHONY: build desktop-build desktop-run install safe-install check-forward-only clean test test-e2e-container check-up-to-date
+.PHONY: build install safe-install check-forward-only clean test test-e2e-container check-up-to-date
 
 BINARY := gt
-BINARY_DESKTOP := gt-desktop
 BUILD_DIR := .
 INSTALL_DIR := $(HOME)/.local/bin
 E2E_IMAGE ?= gastown-test
@@ -43,16 +42,6 @@ ifeq ($(shell uname),Darwin)
 	@codesign -s - -f $(BUILD_DIR)/$(BINARY) 2>/dev/null || true
 	@echo "Signed $(BINARY) for macOS"
 endif
-
-desktop-build:
-	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_DESKTOP) ./cmd/gt-desktop
-ifeq ($(shell uname),Darwin)
-	@codesign -s - -f $(BUILD_DIR)/$(BINARY_DESKTOP) 2>/dev/null || true
-	@echo "Signed $(BINARY_DESKTOP) for macOS"
-endif
-
-desktop-run:
-	go run ./cmd/gt-desktop
 
 check-up-to-date:
 ifndef SKIP_UPDATE_CHECK
