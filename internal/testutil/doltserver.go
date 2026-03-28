@@ -5,6 +5,7 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -23,21 +24,40 @@ import (
 const DoltDockerImage = "dolthub/dolt-sql-server:1.83.0"
 
 var (
-	doltCtr      *dolt.DoltContainer
-	doltCtrOnce  sync.Once
-	doltCtrErr   error
-	doltCtrPort  string
-	dockerOnce   sync.Once
-	dockerAvail  bool
+	doltCtr                *dolt.DoltContainer
+	doltCtrOnce            sync.Once
+	doltCtrErr             error
+	doltCtrPort            string
+	dockerOnce             sync.Once
+	dockerAvail            bool
+	dockerProbeTimeout     = 5 * time.Second
+	doltStartupTimeout     = 90 * time.Second
+	doltMappedPortTimeout  = 15 * time.Second
+	dockerAvailabilityFunc = dockerInfoReachable
 )
 
 // isDockerAvailable returns true if the Docker daemon is reachable.
 // The result is cached after the first call.
 func isDockerAvailable() bool {
 	dockerOnce.Do(func() {
-		dockerAvail = exec.Command("docker", "info").Run() == nil
+		ctx, cancel := context.WithTimeout(context.Background(), dockerProbeTimeout)
+		defer cancel()
+		dockerAvail = dockerAvailabilityFunc(ctx) == nil
 	})
 	return dockerAvail
+}
+
+func dockerInfoReachable(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	return nil
 }
 
 // isReaperRemovingErr returns true if the error is a transient "removing"
@@ -77,14 +97,17 @@ func runDoltContainerWithRetry(ctx context.Context) (*dolt.DoltContainer, error)
 // startSharedDoltContainer starts the shared Dolt container and sets
 // GT_DOLT_PORT and BEADS_DOLT_PORT process-wide.
 func startSharedDoltContainer() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), doltStartupTimeout)
+	defer cancel()
 	ctr, err := runDoltContainerWithRetry(ctx)
 	if err != nil {
 		doltCtrErr = fmt.Errorf("starting Dolt container: %w", err)
 		return
 	}
 
-	p, err := ctr.MappedPort(ctx, "3306/tcp")
+	portCtx, portCancel := context.WithTimeout(context.Background(), doltMappedPortTimeout)
+	defer portCancel()
+	p, err := ctr.MappedPort(portCtx, "3306/tcp")
 	if err != nil {
 		doltCtrErr = fmt.Errorf("getting mapped port: %w", err)
 		_ = testcontainers.TerminateContainer(ctr)
@@ -106,7 +129,8 @@ func StartIsolatedDoltContainer(t *testing.T) string {
 		t.Skip("Docker not available, skipping test")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), doltStartupTimeout)
+	defer cancel()
 	ctr, err := runDoltContainerWithRetry(ctx)
 	if err != nil {
 		t.Fatalf("starting Dolt container: %v", err)
@@ -117,7 +141,9 @@ func StartIsolatedDoltContainer(t *testing.T) string {
 		}
 	})
 
-	port, err := ctr.MappedPort(ctx, "3306/tcp")
+	portCtx, portCancel := context.WithTimeout(context.Background(), doltMappedPortTimeout)
+	defer portCancel()
+	port, err := ctr.MappedPort(portCtx, "3306/tcp")
 	if err != nil {
 		t.Fatalf("getting mapped port: %v", err)
 	}
