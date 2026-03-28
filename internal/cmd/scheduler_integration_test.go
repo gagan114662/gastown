@@ -268,7 +268,7 @@ func TestSchedulerCircuitBreakerExclusion(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
 	// Create a bead and manually set up a circuit-broken sling context.
-	beadID := createTestBead(t, rigPath, env, "Circuit breaker test")
+	beadID := createTestBead(t, rigPath, "Circuit breaker test")
 
 	// Create a sling context with dispatch_failures >= maxDispatchFailures (circuit-broken).
 	createSlingContext(t, hqPath, &capacity.SlingContextFields{
@@ -308,7 +308,7 @@ func TestSchedulerCircuitBreakerExclusion(t *testing.T) {
 func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	beadID := createTestBead(t, rigPath, env, "Auto convoy test")
+	beadID := createTestBead(t, rigPath, "Auto convoy test")
 
 	// Schedule via gt sling deferred dispatch (max_polecats > 0)
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
@@ -326,7 +326,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	}
 
 	// Verify: convoy is resolvable via bd show from hq
-	cmd := newSchedulerBDCommand(hqPath, env, "show", fields.Convoy, "--json", "--allow-stale")
+	cmd := newSchedulerBDCommand(hqPath, "show", fields.Convoy, "--json", "--allow-stale")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd show convoy %s failed: %v", fields.Convoy, err)
@@ -348,7 +348,7 @@ func TestSchedulerAutoConvoyCreation(t *testing.T) {
 	// Verify: convoy has a "tracks" dependency pointing to the rig bead.
 	// This is the core cross-rig link: convoy lives in HQ DB, bead in rig DB.
 	depArgs := beads.MaybePrependAllowStale([]string{"dep", "list", fields.Convoy, "--direction=down", "--type=tracks", "--json"})
-	depCmd := newSchedulerBDCommand(hqPath, env, depArgs...)
+	depCmd := newSchedulerBDCommand(hqPath, depArgs...)
 	depOut, err := depCmd.Output()
 	if err != nil {
 		t.Fatalf("bd dep list %s --type=tracks failed: %v", fields.Convoy, err)
@@ -377,16 +377,16 @@ func TestSchedulerBlockedStatusReporting(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
 	// Create three beads: one to be ready, one to be blocked, one blocker
-	readyID := createTestBead(t, rigPath, env, "Ready bead")
-	blockedID := createTestBead(t, rigPath, env, "Blocked bead")
-	blockerID := createTestBead(t, rigPath, env, "Blocker bead")
+	readyID := createTestBead(t, rigPath, "Ready bead")
+	blockedID := createTestBead(t, rigPath, "Blocked bead")
+	blockerID := createTestBead(t, rigPath, "Blocker bead")
 
 	// Schedule ready and blocked beads via gt sling deferred dispatch (max_polecats > 0)
 	slingToScheduler(t, gtBinary, hqPath, env, readyID, "testrig")
 	slingToScheduler(t, gtBinary, hqPath, env, blockedID, "testrig")
 
 	// Add blocking dependency: blockerID blocks blockedID
-	addBeadDependency(t, blockedID, blockerID, rigPath, env)
+	addBeadDependency(t, blockedID, blockerID, rigPath)
 
 	// Verify: scheduler list should show both, with correct blocked status
 	listed := getSchedulerList(t, gtBinary, hqPath, env)
@@ -436,10 +436,10 @@ func TestSchedulerBlockedStatusReporting(t *testing.T) {
 func TestSchedulerSlingDryRun(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	beadID := createTestBead(t, rigPath, env, "Dry run test")
+	beadID := createTestBead(t, rigPath, "Dry run test")
 
 	// Capture description before dry-run
-	descBefore := getBeadDescription(t, beadID, rigPath, env)
+	descBefore := getBeadDescription(t, beadID, rigPath)
 
 	// Run sling deferred dispatch (max_polecats > 0) --dry-run
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig", "--dry-run")
@@ -450,14 +450,14 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 	}
 
 	// Verify: work bead description unchanged
-	descAfter := getBeadDescription(t, beadID, rigPath, env)
+	descAfter := getBeadDescription(t, beadID, rigPath)
 	if descAfter != descBefore {
 		t.Errorf("dry-run should NOT modify description\nbefore: %q\nafter:  %q", descBefore, descAfter)
 	}
 
 	// Verify: no convoy created (HQ beads DB should have no convoy issues)
 	listArgs := beads.MaybePrependAllowStale([]string{"list", "--type=convoy", "--json"})
-	cmd := newSchedulerBDCommand(hqPath, env, listArgs...)
+	cmd := newSchedulerBDCommand(hqPath, listArgs...)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("bd list convoys failed: %v", err)
@@ -478,7 +478,7 @@ func TestSchedulerSlingDryRun(t *testing.T) {
 func TestSchedulerSlingContextIdempotency(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	beadID := createTestBead(t, rigPath, env, "Idempotency test")
+	beadID := createTestBead(t, rigPath, "Idempotency test")
 
 	// Schedule twice
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
@@ -507,22 +507,22 @@ func TestSchedulerSlingContextIdempotency(t *testing.T) {
 func TestSchedulerSlingContextWorkBeadPristine(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	beadID := createTestBead(t, rigPath, env, "Pristine test")
+	beadID := createTestBead(t, rigPath, "Pristine test")
 
 	// Capture state before scheduling
-	descBefore := getBeadDescription(t, beadID, rigPath, env)
+	descBefore := getBeadDescription(t, beadID, rigPath)
 
 	// Schedule the bead
 	slingToScheduler(t, gtBinary, hqPath, env, beadID, "testrig")
 
 	// Verify: description unchanged
-	descAfter := getBeadDescription(t, beadID, rigPath, env)
+	descAfter := getBeadDescription(t, beadID, rigPath)
 	if descAfter != descBefore {
 		t.Errorf("scheduling should NOT modify work bead description\nbefore: %q\nafter:  %q", descBefore, descAfter)
 	}
 
 	// Verify: no scheduler-related labels on work bead
-	if beadHasLabel(t, beadID, capacity.LabelSlingContext, rigPath, env) {
+	if beadHasLabel(t, beadID, capacity.LabelSlingContext, rigPath) {
 		t.Errorf("work bead should NOT have %s label", capacity.LabelSlingContext)
 	}
 }
@@ -685,8 +685,8 @@ func TestSchedulerMultiRigDispatch(t *testing.T) {
 	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create one bead in each rig.
-	bead1 := createTestBead(t, rig1Path, env, "Rig1 bead")
-	bead2 := createTestBead(t, rig2Path, env, "Rig2 bead")
+	bead1 := createTestBead(t, rig1Path, "Rig1 bead")
+	bead2 := createTestBead(t, rig2Path, "Rig2 bead")
 
 	// Schedule both to their respective rigs.
 	slingToScheduler(t, gtBinary, hqPath, env, bead1, "rig1")
@@ -743,17 +743,17 @@ func TestSchedulerMultiRigEpicAutoResolve(t *testing.T) {
 	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create an epic in rig1.
-	epicID := createTestBeadOfType(t, rig1Path, env, "Multi-rig epic", "epic")
+	epicID := createTestBeadOfType(t, rig1Path, "Multi-rig epic", "epic")
 
 	// Create children in different rigs.
-	child1 := createTestBead(t, rig1Path, env, "Rig1 child")
-	child2 := createTestBead(t, rig2Path, env, "Rig2 child")
+	child1 := createTestBead(t, rig1Path, "Rig1 child")
+	child2 := createTestBead(t, rig2Path, "Rig2 child")
 
 	// Link children to epic via depends_on (epic → child).
 	// child1 is local to rig1 — resolves directly.
-	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path, env)
+	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
 	// child2 is in rig2 — resolved via routes.jsonl as an external ref.
-	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path, env)
+	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
 
 	// Dry-run: verify auto-rig-resolution routes each child correctly.
 	// Uses --dry-run to avoid needing formula infrastructure (mol-polecat-work).
@@ -808,7 +808,7 @@ func TestSchedulerConvoyFlagRejection(t *testing.T) {
 	hqPath, _, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create a convoy in HQ.
-	convoyID := createTestBeadOfType(t, hqPath, env, "Flag rejection convoy", "convoy")
+	convoyID := createTestBeadOfType(t, hqPath, "Flag rejection convoy", "convoy")
 
 	// Attempt to schedule convoy with task-only flag --ralph.
 	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", convoyID, "--ralph")
@@ -829,10 +829,10 @@ func TestSchedulerEpicFlagRejection(t *testing.T) {
 	hqPath, rig1Path, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create an epic in rig1.
-	epicID := createTestBeadOfType(t, rig1Path, env, "Flag rejection epic", "epic")
+	epicID := createTestBeadOfType(t, rig1Path, "Flag rejection epic", "epic")
 	// Create a child so the epic has something to schedule.
-	child := createTestBead(t, rig1Path, env, "Epic child")
-	addBeadDependencyOfType(t, epicID, child, "depends_on", rig1Path, env)
+	child := createTestBead(t, rig1Path, "Epic child")
+	addBeadDependencyOfType(t, epicID, child, "depends_on", rig1Path)
 
 	// Attempt to schedule epic with task-only flag --account.
 	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", epicID, "--account", "foo")
@@ -853,11 +853,11 @@ func TestSchedulerEpicDetection(t *testing.T) {
 	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create an epic with cross-rig children.
-	epicID := createTestBeadOfType(t, rig1Path, env, "Detection epic", "epic")
-	child1 := createTestBead(t, rig1Path, env, "Rig1 child")
-	child2 := createTestBead(t, rig2Path, env, "Rig2 child")
-	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path, env)
-	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path, env)
+	epicID := createTestBeadOfType(t, rig1Path, "Detection epic", "epic")
+	child1 := createTestBead(t, rig1Path, "Rig1 child")
+	child2 := createTestBead(t, rig2Path, "Rig2 child")
+	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
+	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
 
 	// gt sling <epic-id> deferred dispatch (max_polecats > 0) --dry-run should auto-detect epic and list children.
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
@@ -882,8 +882,8 @@ func TestSchedulerMixedBatchRejection(t *testing.T) {
 	hqPath, rig1Path, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create a task bead and an epic in rig1.
-	taskID := createTestBead(t, rig1Path, env, "Task bead")
-	epicID := createTestBeadOfType(t, rig1Path, env, "Epic bead", "epic")
+	taskID := createTestBead(t, rig1Path, "Task bead")
+	epicID := createTestBeadOfType(t, rig1Path, "Epic bead", "epic")
 
 	// Attempt to sling a task + epic together (no rig target).
 	// Should fail because the epic ID is not a valid rig target.
@@ -900,16 +900,16 @@ func TestSchedulerMultiRigConvoyAutoResolve(t *testing.T) {
 	hqPath, rig1Path, rig2Path, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create a convoy in HQ (the typical location for convoys).
-	convoyID := createTestBeadOfType(t, hqPath, env, "Multi-rig convoy", "convoy")
+	convoyID := createTestBeadOfType(t, hqPath, "Multi-rig convoy", "convoy")
 
 	// Create beads in different rigs.
-	bead1 := createTestBead(t, rig1Path, env, "Rig1 tracked bead")
-	bead2 := createTestBead(t, rig2Path, env, "Rig2 tracked bead")
+	bead1 := createTestBead(t, rig1Path, "Rig1 tracked bead")
+	bead2 := createTestBead(t, rig2Path, "Rig2 tracked bead")
 
 	// Add tracks deps from convoy (HQ) to beads in each rig.
 	// bead1 and bead2 are in different DBs — stored as external refs in HQ.
-	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath, env)
-	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath, env)
+	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
+	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
 
 	// Wait for bd's issues.jsonl timestamp to settle (same race as
 	// TestSchedulerDirectConvoyDispatch — 1-second granularity stale check).
@@ -971,7 +971,7 @@ func TestSchedulerDisabledMode(t *testing.T) {
 	// Reconfigure scheduler to disabled mode (max_polecats=0)
 	configureScheduler(t, hqPath, 0, 1)
 
-	beadID := createTestBead(t, rigPath, env, "Disabled mode test")
+	beadID := createTestBead(t, rigPath, "Disabled mode test")
 
 	// gt sling --dry-run should succeed (direct dispatch, not deferred)
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", beadID, "testrig", "--hook-raw-bead", "--dry-run")
@@ -1015,7 +1015,7 @@ func TestSchedulerDirectModeNoQueue(t *testing.T) {
 func TestSchedulerDeferredTaskWithoutRig(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	beadID := createTestBead(t, rigPath, env, "No rig test")
+	beadID := createTestBead(t, rigPath, "No rig test")
 
 	// gt sling <bead> (no rig) in deferred mode should error
 	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", beadID, "--hook-raw-bead")
@@ -1050,8 +1050,8 @@ func TestSchedulerConfigSetZero(t *testing.T) {
 func TestSchedulerDeferredNonRigRejection(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
-	beadID := createTestBead(t, rigPath, env, "Non-rig rejection test")
-	otherBead := createTestBead(t, rigPath, env, "Not a rig target")
+	beadID := createTestBead(t, rigPath, "Non-rig rejection test")
+	otherBead := createTestBead(t, rigPath, "Not a rig target")
 
 	// gt sling <bead> <non-rig-bead> in deferred mode should error
 	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", beadID, otherBead, "--hook-raw-bead")
@@ -1081,11 +1081,11 @@ func TestSchedulerDirectEpicDispatch(t *testing.T) {
 	configureScheduler(t, hqPath, -1, 1)
 
 	// Create an epic with cross-rig children.
-	epicID := createTestBeadOfType(t, rig1Path, env, "Direct dispatch epic", "epic")
-	child1 := createTestBead(t, rig1Path, env, "Rig1 direct child")
-	child2 := createTestBead(t, rig2Path, env, "Rig2 direct child")
-	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path, env)
-	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path, env)
+	epicID := createTestBeadOfType(t, rig1Path, "Direct dispatch epic", "epic")
+	child1 := createTestBead(t, rig1Path, "Rig1 direct child")
+	child2 := createTestBead(t, rig2Path, "Rig2 direct child")
+	addBeadDependencyOfType(t, epicID, child1, "depends_on", rig1Path)
+	addBeadDependencyOfType(t, epicID, child2, "depends_on", rig1Path)
 
 	// gt sling <epic-id> --dry-run in direct mode should show direct dispatch, not scheduling
 	out := runGTCmdOutput(t, gtBinary, hqPath, env, "sling", epicID, "--dry-run")
@@ -1109,8 +1109,8 @@ func TestSchedulerBatchEpicRejection(t *testing.T) {
 	hqPath, rig1Path, _, gtBinary, env := setupMultiRigSchedulerTown(t)
 
 	// Create an epic and a task bead in rig1.
-	epicID := createTestBeadOfType(t, rig1Path, env, "Batch epic", "epic")
-	taskID := createTestBead(t, rig1Path, env, "Batch task")
+	epicID := createTestBeadOfType(t, rig1Path, "Batch epic", "epic")
+	taskID := createTestBead(t, rig1Path, "Batch task")
 
 	// gt sling <epic> <task> <rig> in deferred mode should reject the epic
 	out, err := runGTCmdMayFail(t, gtBinary, hqPath, env, "sling", epicID, taskID, "rig1", "--hook-raw-bead")
@@ -1128,7 +1128,7 @@ func TestSchedulerInvalidJSONContextCleanup(t *testing.T) {
 	hqPath, rigPath, gtBinary, env := setupSchedulerIntegrationTown(t)
 
 	// Create a bead and a valid sling context for it.
-	beadID := createTestBead(t, rigPath, env, "Invalid JSON cleanup test")
+	beadID := createTestBead(t, rigPath, "Invalid JSON cleanup test")
 	ctxID := createSlingContext(t, hqPath, &capacity.SlingContextFields{
 		Version:    1,
 		WorkBeadID: beadID,
@@ -1137,7 +1137,7 @@ func TestSchedulerInvalidJSONContextCleanup(t *testing.T) {
 	})
 
 	// Corrupt the context bead description with invalid JSON.
-	corruptCmd := newSchedulerBDCommand(hqPath, env, "update", ctxID, "--description=not valid json {{{")
+	corruptCmd := newSchedulerBDCommand(hqPath, "update", ctxID, "--description=not valid json {{{")
 	if out, err := corruptCmd.CombinedOutput(); err != nil {
 		t.Fatalf("bd update to corrupt description failed: %v\n%s", err, out)
 	}
@@ -1169,11 +1169,11 @@ func TestSchedulerDirectConvoyDispatch(t *testing.T) {
 	configureScheduler(t, hqPath, -1, 1)
 
 	// Create a convoy in HQ tracking beads in different rigs.
-	convoyID := createTestBeadOfType(t, hqPath, env, "Direct dispatch convoy", "convoy")
-	bead1 := createTestBead(t, rig1Path, env, "Rig1 direct tracked")
-	bead2 := createTestBead(t, rig2Path, env, "Rig2 direct tracked")
-	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath, env)
-	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath, env)
+	convoyID := createTestBeadOfType(t, hqPath, "Direct dispatch convoy", "convoy")
+	bead1 := createTestBead(t, rig1Path, "Rig1 direct tracked")
+	bead2 := createTestBead(t, rig2Path, "Rig2 direct tracked")
+	addBeadDependencyOfType(t, convoyID, bead1, "tracks", hqPath)
+	addBeadDependencyOfType(t, convoyID, bead2, "tracks", hqPath)
 
 	// Wait for bd's issues.jsonl timestamp to settle. bd checks that the Dolt
 	// import timestamp >= jsonl mtime (1-second granularity). Without this,
