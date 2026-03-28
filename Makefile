@@ -1,4 +1,4 @@
-.PHONY: build desktop-build desktop-run install safe-install check-forward-only clean test test-e2e-container check-up-to-date
+.PHONY: build desktop-build desktop-run install safe-install check-forward-only clean test test-e2e-container check-up-to-date ui
 
 BINARY := gt
 BINARY_DESKTOP := gt-desktop
@@ -173,3 +173,6 @@ else
 		sleep 2; \
 	done
 endif
+
+ui:
+	cd ui && pnpm install && pnpm build
