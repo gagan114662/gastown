@@ -168,7 +168,7 @@ func syncContextMemories(store *ctxstack.Store) error {
 			continue
 		}
 		memType, shortKey := parseMemoryKey(key)
-		record := decodeMemoryRecord(memType, shortKey, value)
+		record := decodeMemoryRecord(memType, value)
 		if err := upsertMemoryContextDoc(store, memType, shortKey, record); err != nil {
 			return err
 		}

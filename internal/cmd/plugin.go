@@ -19,15 +19,15 @@ import (
 
 // Plugin command flags
 var (
-	pluginListJSON     bool
-	pluginShowJSON     bool
-	pluginRunForce     bool
-	pluginRunDryRun    bool
-	pluginHistoryJSON  bool
-	pluginHistoryLimit int
-	pluginSyncSource   string
-	pluginSyncClean    bool
-	pluginSyncDryRun   bool
+	pluginListJSON      bool
+	pluginShowJSON      bool
+	pluginRunForce      bool
+	pluginRunDryRun     bool
+	pluginHistoryJSON   bool
+	pluginHistoryLimit  int
+	pluginSyncSource    string
+	pluginSyncClean     bool
+	pluginSyncDryRun    bool
 	pluginInstallSource string
 )
 
@@ -746,17 +746,8 @@ func resolvePluginInstallSource(townRoot, target, sourceOverride string) (source
 		if err != nil {
 			return "", "", "", nil, err
 		}
-		if nested, nestedCleanup, nestedErr := detectPluginSourceDir(sourceDir); nestedErr == nil {
+		if nested, nestedErr := detectPluginSourceDir(sourceDir); nestedErr == nil {
 			sourceDir = nested
-			if nestedCleanup != nil {
-				prev := cleanup
-				cleanup = func() {
-					nestedCleanup()
-					if prev != nil {
-						prev()
-					}
-				}
-			}
 		}
 		return sourceDir, target, sourceOverride, cleanup, nil
 	}
@@ -774,7 +765,7 @@ func resolvePluginInstallSource(townRoot, target, sourceOverride string) (source
 		return filepath.Dir(expandedTarget), filepath.Base(expandedTarget), expandedTarget, nil, nil
 	}
 	if dirInfo, err := os.Stat(expandedTarget); err == nil && dirInfo.IsDir() {
-		sourceDir, cleanup, err = detectPluginSourceDir(expandedTarget)
+		sourceDir, err = detectPluginSourceDir(expandedTarget)
 		if err != nil {
 			return "", "", "", nil, err
 		}
@@ -785,7 +776,7 @@ func resolvePluginInstallSource(townRoot, target, sourceOverride string) (source
 		if err != nil {
 			return "", "", "", nil, err
 		}
-		if nested, _, nestedErr := detectPluginSourceDir(sourceDir); nestedErr == nil {
+		if nested, nestedErr := detectPluginSourceDir(sourceDir); nestedErr == nil {
 			sourceDir = nested
 		}
 		return sourceDir, "", target, cleanup, nil
@@ -812,20 +803,20 @@ func expandPluginPath(path string) string {
 	return abs
 }
 
-func detectPluginSourceDir(root string) (string, func(), error) {
+func detectPluginSourceDir(root string) (string, error) {
 	if isSinglePluginDir(root) {
-		return filepath.Dir(root), nil, nil
+		return filepath.Dir(root), nil
 	}
 	if filepath.Base(root) == "plugins" {
-		return root, nil, nil
+		return root, nil
 	}
 	if pluginsDir := filepath.Join(root, "plugins"); pluginSourceExists(pluginsDir) {
-		return pluginsDir, nil, nil
+		return pluginsDir, nil
 	}
 	if pluginSourceExists(root) {
-		return root, nil, nil
+		return root, nil
 	}
-	return "", nil, fmt.Errorf("no plugin packages found in %s", root)
+	return "", fmt.Errorf("no plugin packages found in %s", root)
 }
 
 func isSinglePluginDir(path string) bool {

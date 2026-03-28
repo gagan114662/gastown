@@ -226,19 +226,54 @@ func EnsureWLCommons(townRoot string) error {
 }
 
 func ensureWLCommonsSchemaUpgrades(townRoot string) error {
+	for _, upgrade := range []struct {
+		table      string
+		column     string
+		definition string
+	}{
+		{table: "completions", column: "evidence_type", definition: "VARCHAR(64)"},
+		{table: "completions", column: "validation_status", definition: "VARCHAR(32) DEFAULT 'unvalidated'"},
+		{table: "completions", column: "verified_by", definition: "VARCHAR(255)"},
+		{table: "completions", column: "verified_at", definition: "TIMESTAMP"},
+		{table: "completions", column: "status_snapshot", definition: "JSON"},
+		{table: "wanted", column: "work_spec", definition: "JSON"},
+	} {
+		if err := ensureWLCommonsColumn(townRoot, upgrade.table, upgrade.column, upgrade.definition); err != nil {
+			return err
+		}
+	}
+
 	script := fmt.Sprintf(`USE %s;
-ALTER TABLE completions ADD COLUMN IF NOT EXISTS evidence_type VARCHAR(64);
-ALTER TABLE completions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(32) DEFAULT 'unvalidated';
-ALTER TABLE completions ADD COLUMN IF NOT EXISTS verified_by VARCHAR(255);
-ALTER TABLE completions ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP;
-ALTER TABLE completions ADD COLUMN IF NOT EXISTS status_snapshot JSON;
-ALTER TABLE wanted ADD COLUMN IF NOT EXISTS work_spec JSON;
 INSERT INTO _meta (%s, value) VALUES ('schema_version', '1.2')
   ON DUPLICATE KEY UPDATE value = '1.2';
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('--allow-empty', '-m', 'Upgrade wl-commons schema to v1.2');
-`, WLCommonsDB, backtickKey())
+	`, WLCommonsDB, backtickKey())
 	return doltSQLScriptWithRetry(townRoot, script)
+}
+
+func ensureWLCommonsColumn(townRoot, table, column, definition string) error {
+	if wlCommonsColumnExists(townRoot, table, column) {
+		return nil
+	}
+	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
+	if err := doltSQLWithRetry(townRoot, WLCommonsDB, query); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
+func wlCommonsColumnExists(townRoot, table, column string) bool {
+	query := fmt.Sprintf(
+		"SELECT column_name FROM information_schema.columns WHERE table_schema = '%s' AND table_name = '%s' AND column_name = '%s'",
+		EscapeSQL(WLCommonsDB), EscapeSQL(table), EscapeSQL(column),
+	)
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return false
+	}
+	rows := parseSimpleCSV(output)
+	return len(rows) > 0
 }
 
 func initWLCommonsSchema(townRoot string) error {

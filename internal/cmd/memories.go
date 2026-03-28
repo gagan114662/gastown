@@ -101,7 +101,7 @@ func runMemories(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		memories = append(memories, memory{memType: memType, shortKey: shortKey, record: decodeMemoryRecord(memType, shortKey, v)})
+		memories = append(memories, memory{memType: memType, shortKey: shortKey, record: decodeMemoryRecord(memType, v)})
 	}
 
 	sort.Slice(memories, func(i, j int) bool {
@@ -242,7 +242,7 @@ func runMemoriesAudit(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		memType, shortKey := parseMemoryKey(k)
-		record := decodeMemoryRecord(memType, shortKey, v)
+		record := decodeMemoryRecord(memType, v)
 		if record.Source == "legacy-kv" {
 			findings = append(findings, finding{key: shortKey, message: "legacy unstructured format"})
 		}

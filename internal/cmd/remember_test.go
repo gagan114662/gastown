@@ -193,7 +193,7 @@ func TestMemTypeRank(t *testing.T) {
 }
 
 func TestDecodeMemoryRecord_LegacyFallback(t *testing.T) {
-	record := decodeMemoryRecord("project", "merge-freeze", "Refinery is paused during releases")
+	record := decodeMemoryRecord("project", "Refinery is paused during releases")
 	if record.Content != "Refinery is paused during releases" {
 		t.Fatalf("content = %q", record.Content)
 	}
@@ -219,7 +219,7 @@ func TestEncodeDecodeMemoryRecord_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encodeMemoryRecord() error: %v", err)
 	}
-	record := decodeMemoryRecord("feedback", "verifier-rule", encoded)
+	record := decodeMemoryRecord("feedback", encoded)
 	if record.Scope != "rig" {
 		t.Fatalf("scope = %q, want rig", record.Scope)
 	}

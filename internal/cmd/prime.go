@@ -517,7 +517,7 @@ func runMemoryInject(ctx RoleContext, hookedBead *beads.Issue) {
 			continue
 		}
 		memType, shortKey := parseMemoryKey(k)
-		record := decodeMemoryRecord(memType, shortKey, v)
+		record := decodeMemoryRecord(memType, v)
 		if !memoryEligibleForPrime(record, policy) {
 			continue
 		}

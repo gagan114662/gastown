@@ -2,6 +2,7 @@
 package chromadb_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/gastown/internal/chromadb"
@@ -21,7 +22,7 @@ func TestBuildContextSummary(t *testing.T) {
 	if summary == "" {
 		t.Error("expected non-empty context summary")
 	}
-	if !containsSubstr(summary, "fixed auth bug") {
+	if !strings.Contains(summary, "fixed auth bug") {
 		t.Errorf("expected transcript content in summary, got: %s", summary)
 	}
 }
@@ -32,13 +33,4 @@ func TestBuildContextSummaryEmpty(t *testing.T) {
 	if summary != "" {
 		t.Errorf("expected empty summary for no results, got: %s", summary)
 	}
-}
-
-func containsSubstr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

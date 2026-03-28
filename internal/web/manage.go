@@ -77,7 +77,7 @@ func (h *ManageHandler) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
-func (h *ManageHandler) handleListPolecats(w http.ResponseWriter, r *http.Request) {
+func (h *ManageHandler) handleListPolecats(w http.ResponseWriter, _ *http.Request) {
 	out, err := h.runGT("agents", "--json")
 	h.proxyJSON(w, out, err)
 }
@@ -95,7 +95,7 @@ func (h *ManageHandler) handleSpawnPolecat(w http.ResponseWriter, r *http.Reques
 	h.proxyJSON(w, out, err)
 }
 
-func (h *ManageHandler) handleStopPolecat(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ManageHandler) handleStopPolecat(w http.ResponseWriter, _ *http.Request, id string) {
 	out, err := h.runGT("signal", "stop", id, "--json")
 	h.proxyJSON(w, out, err)
 }
@@ -127,7 +127,7 @@ func (h *ManageHandler) handleAssignBead(w http.ResponseWriter, r *http.Request,
 	h.proxyJSON(w, out, err)
 }
 
-func (h *ManageHandler) handleCloseBead(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ManageHandler) handleCloseBead(w http.ResponseWriter, _ *http.Request, id string) {
 	out, err := h.runGT("close", id, "--json")
 	h.proxyJSON(w, out, err)
 }

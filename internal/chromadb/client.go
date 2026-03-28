@@ -17,6 +17,12 @@ type Client struct {
 	httpClient *http.Client
 }
 
+func closeResponseBody(body io.Closer) {
+	if err := body.Close(); err != nil {
+		// Best effort only; callers already consumed the actionable HTTP result.
+	}
+}
+
 // NewClient creates a new Chroma client for the given base URL.
 func NewClient(baseURL string) *Client {
 	return &Client{
@@ -31,7 +37,7 @@ func (c *Client) Ping() error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("chroma ping: status %d", resp.StatusCode)
 	}
@@ -61,7 +67,7 @@ func (c *Client) EnsureCollection(name string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("ensure collection %q: status %d: %s", name, resp.StatusCode, b)
@@ -93,7 +99,7 @@ func (c *Client) Upsert(collection string, docs []Document) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upsert %q: status %d: %s", collection, resp.StatusCode, b)
@@ -117,7 +123,7 @@ func (c *Client) Query(collection, text string, topK int) ([]QueryResult, error)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer closeResponseBody(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("query %q: status %d: %s", collection, resp.StatusCode, b)

@@ -87,7 +87,7 @@ func encodeMemoryRecord(record memoryRecord) (string, error) {
 	return string(data), nil
 }
 
-func decodeMemoryRecord(memType, key, raw string) memoryRecord {
+func decodeMemoryRecord(memType, raw string) memoryRecord {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return normalizeMemoryRecord(memoryRecord{Type: memType})
