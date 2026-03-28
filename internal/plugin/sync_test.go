@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // helper to create a plugin directory with a plugin.md and optional extra files.
@@ -254,5 +255,40 @@ func TestDetectDrift_ExtraInTarget(t *testing.T) {
 	// Extra plugins are not drift (no HasDrift), but are reported
 	if len(report.Extra) != 1 || report.Extra[0] != "orphan" {
 		t.Errorf("expected orphan in extra, got %v", report.Extra)
+	}
+}
+
+func TestInstallPlugins_SinglePluginWritesMetadata(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	createTestPlugin(t, srcDir, "deploy-check", "+++\nname = \"deploy-check\"\napi_version = \"v2\"\nmin_gastown_version = \"1.2.3\"\npermissions = [\"git:push\"]\n+++\nverify deploy", nil)
+
+	result, err := InstallPlugins(srcDir, dstDir, "deploy-check", "/tmp/source/plugins")
+	if err != nil {
+		t.Fatalf("InstallPlugins() error: %v", err)
+	}
+	if len(result.Copied) != 1 || result.Copied[0] != "deploy-check" {
+		t.Fatalf("expected deploy-check copied, got %+v", result)
+	}
+
+	meta, err := LoadInstallMetadata(filepath.Join(dstDir, "deploy-check"))
+	if err != nil {
+		t.Fatalf("LoadInstallMetadata() error: %v", err)
+	}
+	if meta.Name != "deploy-check" {
+		t.Errorf("metadata name = %q, want deploy-check", meta.Name)
+	}
+	if meta.Source != "/tmp/source/plugins" {
+		t.Errorf("metadata source = %q, want /tmp/source/plugins", meta.Source)
+	}
+	if meta.APIVersion != "v2" {
+		t.Errorf("metadata api version = %q, want v2", meta.APIVersion)
+	}
+	if meta.MinGastownVersion != "1.2.3" {
+		t.Errorf("metadata min version = %q, want 1.2.3", meta.MinGastownVersion)
+	}
+	if time.Since(meta.InstalledAt) > time.Minute {
+		t.Errorf("metadata installed_at too old: %v", meta.InstalledAt)
 	}
 }

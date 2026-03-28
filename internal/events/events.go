@@ -62,6 +62,8 @@ const (
 	TypeEscalationAcked  = "escalation_acked"
 	TypeEscalationClosed = "escalation_closed"
 	TypePatrolComplete   = "patrol_complete"
+	TypeAutoRemediation  = "auto_remediation"
+	TypeAnomalyInvestigation = "anomaly_investigation"
 
 	// Merge queue events (emitted by refinery)
 	TypeMergeStarted = "merge_started"

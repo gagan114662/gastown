@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -188,5 +189,80 @@ func TestMemTypeRank(t *testing.T) {
 	// unknown types should sort last
 	if memTypeRank("unknown") <= memTypeRank("general") {
 		t.Error("unknown type should rank after general")
+	}
+}
+
+func TestDecodeMemoryRecord_LegacyFallback(t *testing.T) {
+	record := decodeMemoryRecord("project", "Refinery is paused during releases")
+	if record.Content != "Refinery is paused during releases" {
+		t.Fatalf("content = %q", record.Content)
+	}
+	if record.Source != "legacy-kv" {
+		t.Fatalf("source = %q, want legacy-kv", record.Source)
+	}
+	if record.Status != memoryStatusActive {
+		t.Fatalf("status = %q, want active", record.Status)
+	}
+}
+
+func TestEncodeDecodeMemoryRecord_RoundTrip(t *testing.T) {
+	encoded, err := encodeMemoryRecord(memoryRecord{
+		Type:            "feedback",
+		Content:         "Always run the pre-merge verifier before gt done",
+		Scope:           "rig",
+		Source:          "manual",
+		Confidence:      0.8,
+		Status:          memoryStatusDraft,
+		Supersedes:      []string{"old-rule", "old-rule"},
+		LastValidatedAt: "2026-03-01",
+	})
+	if err != nil {
+		t.Fatalf("encodeMemoryRecord() error: %v", err)
+	}
+	record := decodeMemoryRecord("feedback", encoded)
+	if record.Scope != "rig" {
+		t.Fatalf("scope = %q, want rig", record.Scope)
+	}
+	if record.Confidence != 0.8 {
+		t.Fatalf("confidence = %.2f, want 0.8", record.Confidence)
+	}
+	if record.Status != memoryStatusDraft {
+		t.Fatalf("status = %q, want draft", record.Status)
+	}
+	if len(record.Supersedes) != 1 || record.Supersedes[0] != "old-rule" {
+		t.Fatalf("supersedes = %v, want deduped old-rule", record.Supersedes)
+	}
+}
+
+func TestMemoryEligibleForPrime(t *testing.T) {
+	policy := defaultMemoryPolicy()
+	record := newMemoryRecord("project", "Keep refinery on main")
+	if !memoryEligibleForPrime(record, policy) {
+		t.Fatal("active high-confidence memory should be eligible")
+	}
+	record.Confidence = 0.2
+	if memoryEligibleForPrime(record, policy) {
+		t.Fatal("low-confidence memory should not be eligible")
+	}
+	record.Confidence = 0.9
+	record.Status = memoryStatusArchived
+	if memoryEligibleForPrime(record, policy) {
+		t.Fatal("archived memory should not be eligible")
+	}
+}
+
+func TestMemoryMetadataLine(t *testing.T) {
+	line := memoryMetadataLine(memoryRecord{
+		Status:          memoryStatusActive,
+		Confidence:      0.75,
+		Scope:           "task",
+		Source:          "manual",
+		LastValidatedAt: "2026-03-01",
+		Supersedes:      []string{"old-memory"},
+	})
+	for _, want := range []string{"status=active", "confidence=0.75", "scope=task", "validated=2026-03-01", "supersedes=old-memory"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("metadata line %q missing %q", line, want)
+		}
 	}
 }

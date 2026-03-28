@@ -24,6 +24,15 @@ type Plugin struct {
 	// Version is the schema version (for future evolution).
 	Version int `json:"version"`
 
+	// APIVersion is the package contract version for plugin distribution.
+	APIVersion string `json:"api_version,omitempty"`
+
+	// MinGastownVersion is the minimum gt version required to run the plugin.
+	MinGastownVersion string `json:"min_gastown_version,omitempty"`
+
+	// Permissions documents the capabilities the plugin expects.
+	Permissions []string `json:"permissions,omitempty"`
+
 	// Location indicates where the plugin was discovered.
 	Location Location `json:"location"`
 
@@ -149,12 +158,15 @@ type Execution struct {
 
 // PluginFrontmatter represents the TOML frontmatter in plugin.md files.
 type PluginFrontmatter struct {
-	Name        string     `toml:"name"`
-	Description string     `toml:"description"`
-	Version     int        `toml:"version"`
-	Gate        *Gate      `toml:"gate,omitempty"`
-	Tracking    *Tracking  `toml:"tracking,omitempty"`
-	Execution   *Execution `toml:"execution,omitempty"`
+	Name              string     `toml:"name"`
+	Description       string     `toml:"description"`
+	Version           int        `toml:"version"`
+	APIVersion        string     `toml:"api_version"`
+	MinGastownVersion string     `toml:"min_gastown_version"`
+	Permissions       []string   `toml:"permissions"`
+	Gate              *Gate      `toml:"gate,omitempty"`
+	Tracking          *Tracking  `toml:"tracking,omitempty"`
+	Execution         *Execution `toml:"execution,omitempty"`
 }
 
 // IsExecWrapper returns true if this plugin is an exec-wrapper type.

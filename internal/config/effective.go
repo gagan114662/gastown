@@ -213,6 +213,12 @@ func mergeRigSettingsInto(dst, src *RigSettings) {
 	if src.Context != nil {
 		dst.Context = src.Context
 	}
+	if src.Memory != nil {
+		dst.Memory = src.Memory
+	}
+	if src.Policy != nil {
+		dst.Policy = src.Policy
+	}
 }
 
 func valueMergeQueue(settings *RigSettings) *MergeQueueConfig {

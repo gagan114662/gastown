@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,15 +19,16 @@ import (
 
 // Plugin command flags
 var (
-	pluginListJSON     bool
-	pluginShowJSON     bool
-	pluginRunForce     bool
-	pluginRunDryRun    bool
-	pluginHistoryJSON  bool
-	pluginHistoryLimit int
-	pluginSyncSource   string
-	pluginSyncClean    bool
-	pluginSyncDryRun   bool
+	pluginListJSON      bool
+	pluginShowJSON      bool
+	pluginRunForce      bool
+	pluginRunDryRun     bool
+	pluginHistoryJSON   bool
+	pluginHistoryLimit  int
+	pluginSyncSource    string
+	pluginSyncClean     bool
+	pluginSyncDryRun    bool
+	pluginInstallSource string
 )
 
 var pluginCmd = &cobra.Command{
@@ -135,6 +137,30 @@ Examples:
 	RunE: runPluginHistory,
 }
 
+var pluginInstallCmd = &cobra.Command{
+	Use:   "install <name|path|git-url>",
+	Short: "Install a plugin package into the town plugin directory",
+	Long: `Install a plugin package into the town-level runtime directory.
+
+The argument can be:
+  - a plugin name from the current gastown source tree
+  - a local plugin directory
+  - a local plugins/ source directory
+  - a git repository URL containing plugin packages
+
+Installed plugins record their source in .gastown-install.json so upgrades can
+reuse the original source automatically.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runPluginInstall,
+}
+
+var pluginUpgradeCmd = &cobra.Command{
+	Use:   "upgrade <name>",
+	Short: "Upgrade an installed plugin from its recorded source",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runPluginUpgrade,
+}
+
 func init() {
 	// List subcommand flags
 	pluginListCmd.Flags().BoolVar(&pluginListJSON, "json", false, "Output as JSON")
@@ -154,6 +180,8 @@ func init() {
 	pluginSyncCmd.Flags().StringVar(&pluginSyncSource, "source", "", "Source plugins directory (auto-detected if omitted)")
 	pluginSyncCmd.Flags().BoolVar(&pluginSyncClean, "clean", false, "Remove plugins from target that don't exist in source")
 	pluginSyncCmd.Flags().BoolVar(&pluginSyncDryRun, "dry-run", false, "Show what would happen without syncing")
+	pluginInstallCmd.Flags().StringVar(&pluginInstallSource, "source", "", "Source plugins directory override for named installs")
+	pluginUpgradeCmd.Flags().StringVar(&pluginInstallSource, "source", "", "Source directory or git URL override")
 
 	// Add subcommands
 	pluginCmd.AddCommand(pluginListCmd)
@@ -161,6 +189,8 @@ func init() {
 	pluginCmd.AddCommand(pluginRunCmd)
 	pluginCmd.AddCommand(pluginHistoryCmd)
 	pluginCmd.AddCommand(pluginSyncCmd)
+	pluginCmd.AddCommand(pluginInstallCmd)
+	pluginCmd.AddCommand(pluginUpgradeCmd)
 
 	rootCmd.AddCommand(pluginCmd)
 }
@@ -338,6 +368,13 @@ func outputPluginShowText(p *plugin.Plugin) error {
 	fmt.Printf("%s %s\n", style.Bold.Render("Location:"), locStr)
 
 	fmt.Printf("%s %d\n", style.Bold.Render("Version:"), p.Version)
+	fmt.Printf("%s %s\n", style.Bold.Render("API version:"), p.APIVersion)
+	if p.MinGastownVersion != "" {
+		fmt.Printf("%s %s\n", style.Bold.Render("Min gt version:"), p.MinGastownVersion)
+	}
+	if len(p.Permissions) > 0 {
+		fmt.Printf("%s %s\n", style.Bold.Render("Permissions:"), strings.Join(p.Permissions, ", "))
+	}
 
 	// Gate
 	fmt.Println()
@@ -627,4 +664,199 @@ func runPluginHistory(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runPluginInstall(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+	targetDir := filepath.Join(townRoot, "plugins")
+
+	sourceDir, pluginName, sourceRef, cleanup, err := resolvePluginInstallSource(townRoot, args[0], pluginInstallSource)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	result, err := plugin.InstallPlugins(sourceDir, targetDir, pluginName, sourceRef)
+	if err != nil {
+		return fmt.Errorf("installing plugin: %w", err)
+	}
+	printPluginInstallResult("Installed", sourceRef, result)
+	return nil
+}
+
+func runPluginUpgrade(cmd *cobra.Command, args []string) error {
+	townRoot, err := workspace.FindFromCwdOrError()
+	if err != nil {
+		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+	targetDir := filepath.Join(townRoot, "plugins")
+	name := args[0]
+
+	var sourceHint string
+	if strings.TrimSpace(pluginInstallSource) != "" {
+		sourceHint = pluginInstallSource
+	} else {
+		meta, err := plugin.LoadInstallMetadata(filepath.Join(targetDir, name))
+		if err == nil {
+			sourceHint = meta.Source
+		}
+	}
+
+	sourceDir, pluginName, sourceRef, cleanup, err := resolvePluginInstallSource(townRoot, name, sourceHint)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	result, err := plugin.InstallPlugins(sourceDir, targetDir, pluginName, sourceRef)
+	if err != nil {
+		return fmt.Errorf("upgrading plugin: %w", err)
+	}
+	printPluginInstallResult("Upgraded", sourceRef, result)
+	return nil
+}
+
+func printPluginInstallResult(verb, sourceRef string, result *plugin.SyncResult) {
+	fmt.Printf("%s %s plugin(s) from %s\n", style.Success.Render("✓"), strings.ToLower(verb), sourceRef)
+	for _, name := range result.Copied {
+		fmt.Printf("  %s %s\n", style.Success.Render("↑"), name)
+	}
+	for _, name := range result.Skipped {
+		fmt.Printf("  %s %s already current\n", style.Dim.Render("·"), name)
+	}
+	for _, e := range result.Errors {
+		fmt.Fprintf(os.Stderr, "  %s %s\n", style.Error.Render("!"), e)
+	}
+}
+
+func resolvePluginInstallSource(townRoot, target, sourceOverride string) (sourceDir, pluginName, sourceRef string, cleanup func(), err error) {
+	if strings.TrimSpace(sourceOverride) != "" && !looksLikeRemotePluginSource(sourceOverride) {
+		sourceOverride = expandPluginPath(sourceOverride)
+	}
+
+	if strings.TrimSpace(sourceOverride) != "" && looksLikeRemotePluginSource(sourceOverride) {
+		sourceDir, cleanup, err = clonePluginSource(sourceOverride)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		if nested, nestedErr := detectPluginSourceDir(sourceDir); nestedErr == nil {
+			sourceDir = nested
+		}
+		return sourceDir, target, sourceOverride, cleanup, nil
+	}
+
+	if strings.TrimSpace(sourceOverride) != "" {
+		sourceDir = sourceOverride
+		if isSinglePluginDir(sourceDir) {
+			return filepath.Dir(sourceDir), filepath.Base(sourceDir), sourceOverride, nil, nil
+		}
+		return sourceDir, target, sourceOverride, nil, nil
+	}
+
+	expandedTarget := expandPluginPath(target)
+	if isSinglePluginDir(expandedTarget) {
+		return filepath.Dir(expandedTarget), filepath.Base(expandedTarget), expandedTarget, nil, nil
+	}
+	if dirInfo, err := os.Stat(expandedTarget); err == nil && dirInfo.IsDir() {
+		sourceDir, err = detectPluginSourceDir(expandedTarget)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		return sourceDir, "", expandedTarget, cleanup, nil
+	}
+	if looksLikeRemotePluginSource(target) {
+		sourceDir, cleanup, err = clonePluginSource(target)
+		if err != nil {
+			return "", "", "", nil, err
+		}
+		if nested, nestedErr := detectPluginSourceDir(sourceDir); nestedErr == nil {
+			sourceDir = nested
+		}
+		return sourceDir, "", target, cleanup, nil
+	}
+
+	sourceDir, err = plugin.FindGastownSource(townRoot)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	return sourceDir, target, sourceDir, nil, nil
+}
+
+func expandPluginPath(path string) string {
+	if path == "" {
+		return path
+	}
+	if filepath.IsAbs(path) {
+		return path
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
+}
+
+func detectPluginSourceDir(root string) (string, error) {
+	if isSinglePluginDir(root) {
+		return filepath.Dir(root), nil
+	}
+	if filepath.Base(root) == "plugins" {
+		return root, nil
+	}
+	if pluginsDir := filepath.Join(root, "plugins"); pluginSourceExists(pluginsDir) {
+		return pluginsDir, nil
+	}
+	if pluginSourceExists(root) {
+		return root, nil
+	}
+	return "", fmt.Errorf("no plugin packages found in %s", root)
+}
+
+func isSinglePluginDir(path string) bool {
+	info, err := os.Stat(filepath.Join(path, "plugin.md"))
+	return err == nil && !info.IsDir()
+}
+
+func pluginSourceExists(path string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			if _, err := os.Stat(filepath.Join(path, entry.Name(), "plugin.md")); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func looksLikeRemotePluginSource(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.Contains(value, "://") || strings.HasPrefix(value, "git@") || strings.HasSuffix(value, ".git") || strings.Count(value, "/") >= 2 && !strings.HasPrefix(value, "/")
+}
+
+func clonePluginSource(source string) (string, func(), error) {
+	tmpDir, err := os.MkdirTemp("", "gt-plugin-source-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cmd := exec.Command("git", "clone", "--depth", "1", source, tmpDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", nil, fmt.Errorf("cloning %s: %w (%s)", source, err, strings.TrimSpace(string(out)))
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(tmpDir)
+	}
+	return tmpDir, cleanup, nil
 }

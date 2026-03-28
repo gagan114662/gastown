@@ -1,0 +1,4 @@
+name = "agent-ci"
+description = "Debug CI failures locally with Docker and retry failed steps without rebuilding the full GitHub Actions environment."
+version = "1.0.0"
+providers = ["claude", "codex", "copilot"]

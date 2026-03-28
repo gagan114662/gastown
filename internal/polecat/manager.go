@@ -18,6 +18,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/steveyegge/gastown/internal/beads"
+	"github.com/steveyegge/gastown/internal/chromadb"
 	"github.com/steveyegge/gastown/internal/config"
 	"github.com/steveyegge/gastown/internal/doltserver"
 	"github.com/steveyegge/gastown/internal/git"
@@ -762,6 +763,18 @@ func (m *Manager) addWithOptionsLocked(name string, opts AddOptions, polecatDir 
 		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
 	}
 
+	// Inject relevant Chroma context (best-effort: skip if Chroma not running).
+	if opts.HookBead != "" {
+		var taskDesc string
+		if beadData, err := m.beads.Show(opts.HookBead); err == nil {
+			taskDesc = beadData.Title
+			if beadData.Description != "" {
+				taskDesc += "\n\n" + beadData.Description
+			}
+		}
+		injectChromaContext(clonePath, taskDesc)
+	}
+
 	if err := m.setupSharedBeads(clonePath); err != nil {
 		cleanupOnError()
 		return nil, fmt.Errorf("setting up shared beads: %w (polecat cannot submit MRs without shared beads)", err)
@@ -935,6 +948,18 @@ func (m *Manager) AddWithOptions(name string, opts AddOptions) (_ *Polecat, retE
 	if _, err := templates.CreatePolecatCLAUDEmd(clonePath, rigName, name); err != nil {
 		// Non-fatal — polecat can still learn via gt prime hook
 		style.PrintWarning("could not provision polecat CLAUDE.md: %v", err)
+	}
+
+	// Inject relevant Chroma context (best-effort: skip if Chroma not running).
+	if opts.HookBead != "" {
+		var taskDesc string
+		if beadData, err := m.beads.Show(opts.HookBead); err == nil {
+			taskDesc = beadData.Title
+			if beadData.Description != "" {
+				taskDesc += "\n\n" + beadData.Description
+			}
+		}
+		injectChromaContext(clonePath, taskDesc)
 	}
 
 	// Set up shared beads: polecat uses rig's .beads via redirect file.
@@ -2414,4 +2439,33 @@ func assessStaleness(info *StalenessInfo, threshold int) (bool, string) {
 	// No session but has agent bead without special state = clean up
 	// (The session is the source of truth for liveness)
 	return true, "no active session"
+}
+
+// injectChromaContext queries Chroma for relevant past work and appends it to
+// the polecat's CLAUDE.local.md. Skips silently if Chroma is not running.
+func injectChromaContext(worktreePath, taskDescription string) {
+	if taskDescription == "" {
+		return
+	}
+	client := chromadb.NewClient("http://localhost:8000")
+	if client.Ping() != nil {
+		return // Chroma not running — skip silently
+	}
+	results, err := chromadb.QueryContext(client, taskDescription)
+	if err != nil {
+		return
+	}
+	summary := chromadb.BuildContextSummary(results)
+	if summary == "" {
+		return
+	}
+	localPath := filepath.Join(worktreePath, "CLAUDE.local.md")
+	existing, _ := os.ReadFile(localPath)
+	var content string
+	if len(existing) > 0 {
+		content = string(existing) + "\n---\n\n" + summary
+	} else {
+		content = summary
+	}
+	_ = os.WriteFile(localPath, []byte(content), 0644)
 }

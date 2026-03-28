@@ -431,6 +431,8 @@ func NewRigSettings() *RigSettings {
 		Version:    CurrentRigSettingsVersion,
 		MergeQueue: DefaultMergeQueueConfig(),
 		Namepool:   DefaultNamepoolConfig(),
+		Memory:     DefaultMemoryConfig(),
+		Policy:     &PolicyConfig{RolePolicies: map[string]*RolePolicyConfig{}},
 	}
 }
 
@@ -2633,6 +2635,9 @@ func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) stri
 	if townRoot != "" {
 		resolvedEnv["GT_ROOT"] = townRoot
 	}
+	if policyJSON := PolicyEnvValue(ResolveRolePolicy(townRoot, rigPath, role)); policyJSON != "" {
+		resolvedEnv["GT_ROLE_POLICY"] = policyJSON
+	}
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
 	}
@@ -2829,6 +2834,9 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 	// Add GT_ROOT so agents can find town-level resources (formulas, etc.)
 	if townRoot != "" {
 		resolvedEnv["GT_ROOT"] = townRoot
+	}
+	if policyJSON := PolicyEnvValue(ResolveRolePolicy(townRoot, rigPath, role)); policyJSON != "" {
+		resolvedEnv["GT_ROLE_POLICY"] = policyJSON
 	}
 	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
 		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv

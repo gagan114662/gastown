@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gastown.dev/schemas/acp/session-update.notification.schema.json",
+  "title": "ACP Session Update Notification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jsonrpc", "method", "params"],
+  "properties": {
+    "jsonrpc": { "const": "2.0" },
+    "method": { "const": "session/update" },
+    "params": {
+      "type": "object",
+      "description": "Runtime-defined progress payload. sessionId is recommended when available.",
+      "properties": {
+        "sessionId": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

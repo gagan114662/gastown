@@ -503,6 +503,7 @@ func runMemoryInject(ctx RoleContext, hookedBead *beads.Issue) {
 	if err != nil {
 		return // Silently skip if kv list fails
 	}
+	policy := loadMemoryPolicy(ctx.TownRoot, ctx.Rig)
 
 	// Group memories by type
 	type mem struct {
@@ -516,7 +517,11 @@ func runMemoryInject(ctx RoleContext, hookedBead *beads.Issue) {
 			continue
 		}
 		memType, shortKey := parseMemoryKey(k)
-		grouped[memType] = append(grouped[memType], mem{shortKey: shortKey, value: v})
+		record := decodeMemoryRecord(memType, v)
+		if !memoryEligibleForPrime(record, policy) {
+			continue
+		}
+		grouped[memType] = append(grouped[memType], mem{shortKey: shortKey, value: record.Content})
 	}
 
 	if len(grouped) == 0 {

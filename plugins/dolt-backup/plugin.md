@@ -2,6 +2,9 @@
 name = "dolt-backup"
 description = "Smart Dolt database backup with change detection"
 version = 2
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["filesystem:write", "dolt:backup", "dolt:read"]
 
 [gate]
 type = "cooldown"

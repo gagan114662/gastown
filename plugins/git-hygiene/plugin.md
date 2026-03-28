@@ -2,6 +2,9 @@
 name = "git-hygiene"
 description = "Clean up stale git branches, stashes, and loose objects across all rig repos"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["git:read", "git:write", "filesystem:write"]
 
 [gate]
 type = "cooldown"

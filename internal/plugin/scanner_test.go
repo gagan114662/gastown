@@ -12,6 +12,9 @@ func TestParsePluginMD(t *testing.T) {
 name = "test-plugin"
 description = "A test plugin"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.9.0"
+permissions = ["gt:mail", "git:push"]
 
 [gate]
 type = "cooldown"
@@ -44,6 +47,15 @@ These are the instructions.
 	}
 	if plugin.Version != 1 {
 		t.Errorf("expected version 1, got %d", plugin.Version)
+	}
+	if plugin.APIVersion != "v1" {
+		t.Errorf("expected api_version v1, got %q", plugin.APIVersion)
+	}
+	if plugin.MinGastownVersion != "0.9.0" {
+		t.Errorf("expected min_gastown_version 0.9.0, got %q", plugin.MinGastownVersion)
+	}
+	if len(plugin.Permissions) != 2 || plugin.Permissions[0] != "gt:mail" {
+		t.Errorf("expected permissions preserved, got %v", plugin.Permissions)
 	}
 	if plugin.Location != LocationTown {
 		t.Errorf("expected location 'town', got %q", plugin.Location)
@@ -130,6 +142,9 @@ version = 1
 	summary := plugin.Summary()
 	if summary.GateType != GateManual {
 		t.Errorf("expected gate type 'manual', got %q", summary.GateType)
+	}
+	if plugin.APIVersion != "v1" {
+		t.Errorf("expected default api version v1, got %q", plugin.APIVersion)
 	}
 }
 

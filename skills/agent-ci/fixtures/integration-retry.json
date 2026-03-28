@@ -1,0 +1,9 @@
+{
+  "query": "How do I retry only the failed integration step locally?",
+  "expect": [
+    "agent-ci",
+    "retry",
+    "integration",
+    "verify.sh pre-merge"
+  ]
+}

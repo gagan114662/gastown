@@ -22,8 +22,15 @@ func TestShowWantedJSON(t *testing.T) {
 		Status:      "open",
 		EffortLevel: "small",
 		EvidenceURL: "https://example.com",
-		CreatedAt:   "2026-01-01",
-		UpdatedAt:   "2026-01-02",
+		WorkSpec: &doltserver.WantedWorkSpec{
+			Version:         1,
+			TargetRepo:      "gagan114662/gastown",
+			Deliverable:     "pr",
+			TargetBranch:    "main",
+			AcceptanceNotes: []string{"add tests", "document contract"},
+		},
+		CreatedAt: "2026-01-01",
+		UpdatedAt: "2026-01-02",
 	})
 
 	out := captureStdout(t, func() {
@@ -51,6 +58,9 @@ func TestShowWantedJSON(t *testing.T) {
 	if len(item.Tags) != 2 {
 		t.Errorf("Tags = %v, want 2 elements", item.Tags)
 	}
+	if item.WorkSpec == nil || item.WorkSpec.TargetRepo != "gagan114662/gastown" {
+		t.Fatalf("WorkSpec = %#v, want target repo", item.WorkSpec)
+	}
 }
 
 func TestShowWantedText(t *testing.T) {
@@ -67,8 +77,14 @@ func TestShowWantedText(t *testing.T) {
 		Status:      "open",
 		EffortLevel: "medium",
 		EvidenceURL: "https://example.com/evidence",
-		CreatedAt:   "2026-02-01",
-		UpdatedAt:   "2026-02-02",
+		WorkSpec: &doltserver.WantedWorkSpec{
+			Version:      1,
+			TargetRepo:   "gagan114662/gastown",
+			Deliverable:  "docs",
+			TargetBranch: "main",
+		},
+		CreatedAt: "2026-02-01",
+		UpdatedAt: "2026-02-02",
 	})
 
 	out := captureStdout(t, func() {
@@ -89,6 +105,9 @@ func TestShowWantedText(t *testing.T) {
 		"Status:", "open",
 		"Effort:", "medium",
 		"Evidence URL:", "https://example.com/evidence",
+		"Work Spec:", "repo: gagan114662/gastown",
+		"deliverable: docs",
+		"branch: main",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\nfull output:\n%s", want, out)
@@ -133,7 +152,7 @@ func TestShowWantedEmptyFields(t *testing.T) {
 	for _, label := range []string{
 		"ID:", "Title:", "Description:", "Project:", "Type:",
 		"Priority:", "Tags:", "Posted By:", "Claimed By:", "Status:",
-		"Effort:", "Evidence URL:",
+		"Effort:", "Evidence URL:", "Work Spec:",
 	} {
 		if !strings.Contains(out, label) {
 			t.Errorf("output missing label %q\nfull output:\n%s", label, out)

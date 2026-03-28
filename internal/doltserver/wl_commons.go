@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/wasteland"
 )
 
 // WLCommonsDB is the database name for the wl-commons shared wanted board.
@@ -43,8 +45,8 @@ type WLCommons struct{ townRoot string }
 // NewWLCommons creates a WLCommonsStore backed by the real Dolt server.
 func NewWLCommons(townRoot string) *WLCommons { return &WLCommons{townRoot: townRoot} }
 
-func (w *WLCommons) EnsureDB() error           { return EnsureWLCommons(w.townRoot) }
-func (w *WLCommons) DatabaseExists(db string) bool { return DatabaseExists(w.townRoot, db) }
+func (w *WLCommons) EnsureDB() error                     { return EnsureWLCommons(w.townRoot) }
+func (w *WLCommons) DatabaseExists(db string) bool       { return DatabaseExists(w.townRoot, db) }
 func (w *WLCommons) InsertWanted(item *WantedItem) error { return InsertWanted(w.townRoot, item) }
 func (w *WLCommons) ClaimWanted(wantedID, rigHandle string) error {
 	return ClaimWanted(w.townRoot, wantedID, rigHandle)
@@ -79,21 +81,55 @@ func (w *WLCommons) UpsertLeaderboard(entry *LeaderboardEntry) error {
 
 // WantedItem represents a row in the wanted table.
 type WantedItem struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description,omitempty"`
-	Project         string   `json:"project,omitempty"`
-	Type            string   `json:"type,omitempty"`
-	Priority        int      `json:"priority"`
-	Tags            []string `json:"tags,omitempty"`
-	PostedBy        string   `json:"posted_by,omitempty"`
-	ClaimedBy       string   `json:"claimed_by,omitempty"`
-	Status          string   `json:"status"`
-	EffortLevel     string   `json:"effort_level,omitempty"`
-	EvidenceURL     string   `json:"evidence_url,omitempty"`
-	SandboxRequired bool     `json:"sandbox_required,omitempty"`
-	CreatedAt       string   `json:"created_at,omitempty"`
-	UpdatedAt       string   `json:"updated_at,omitempty"`
+	ID              string          `json:"id"`
+	Title           string          `json:"title"`
+	Description     string          `json:"description,omitempty"`
+	Project         string          `json:"project,omitempty"`
+	Type            string          `json:"type,omitempty"`
+	Priority        int             `json:"priority"`
+	Tags            []string        `json:"tags,omitempty"`
+	PostedBy        string          `json:"posted_by,omitempty"`
+	ClaimedBy       string          `json:"claimed_by,omitempty"`
+	Status          string          `json:"status"`
+	EffortLevel     string          `json:"effort_level,omitempty"`
+	EvidenceURL     string          `json:"evidence_url,omitempty"`
+	SandboxRequired bool            `json:"sandbox_required,omitempty"`
+	WorkSpec        *WantedWorkSpec `json:"work_spec,omitempty"`
+	CreatedAt       string          `json:"created_at,omitempty"`
+	UpdatedAt       string          `json:"updated_at,omitempty"`
+}
+
+// WantedWorkSpec is the portable schema attached to a Wasteland wanted item.
+type WantedWorkSpec struct {
+	Version         int      `json:"version"`
+	TargetRepo      string   `json:"target_repo,omitempty"`
+	Deliverable     string   `json:"deliverable,omitempty"`
+	TargetBranch    string   `json:"target_branch,omitempty"`
+	AcceptanceNotes []string `json:"acceptance_notes,omitempty"`
+}
+
+// CompletionRecord represents a row in the completions table.
+type CompletionRecord struct {
+	ID               string                    `json:"id"`
+	WantedID         string                    `json:"wanted_id"`
+	CompletedBy      string                    `json:"completed_by"`
+	Evidence         string                    `json:"evidence"`
+	EvidenceType     string                    `json:"evidence_type,omitempty"`
+	ValidationStatus string                    `json:"validation_status,omitempty"`
+	VerifiedBy       string                    `json:"verified_by,omitempty"`
+	VerifiedAt       string                    `json:"verified_at,omitempty"`
+	CompletedAt      string                    `json:"completed_at,omitempty"`
+	StatusSnapshot   *CompletionStatusSnapshot `json:"status_snapshot,omitempty"`
+}
+
+// CompletionStatusSnapshot captures the claimant's execution/trust state at submission time.
+type CompletionStatusSnapshot struct {
+	Version          int    `json:"version"`
+	RigHandle        string `json:"rig_handle"`
+	ClaimStatus      string `json:"claim_status,omitempty"`
+	ValidationStatus string `json:"validation_status,omitempty"`
+	TrustTier        string `json:"trust_tier,omitempty"`
+	SubmittedAt      string `json:"submitted_at,omitempty"`
 }
 
 // isNothingToCommit returns true if the error indicates DOLT_COMMIT found no
@@ -109,6 +145,47 @@ func isNothingToCommit(err error) bool {
 func EscapeSQL(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+func encodeJSONField(value any) string {
+	if value == nil {
+		return "NULL"
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "NULL"
+	}
+	return fmt.Sprintf("'%s'", EscapeSQL(string(data)))
+}
+
+func decodeWorkSpec(raw string) *WantedWorkSpec {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" || raw == "null" {
+		return nil
+	}
+	var spec WantedWorkSpec
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return nil
+	}
+	if spec.Version == 0 {
+		spec.Version = 1
+	}
+	return &spec
+}
+
+func decodeCompletionSnapshot(raw string) *CompletionStatusSnapshot {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" || raw == "null" {
+		return nil
+	}
+	var snapshot CompletionStatusSnapshot
+	if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+		return nil
+	}
+	if snapshot.Version == 0 {
+		snapshot.Version = 1
+	}
+	return &snapshot
 }
 
 // GenerateWantedID generates a unique wanted item ID in the format w-<10-char-hash>.
@@ -129,7 +206,7 @@ func EnsureWLCommons(townRoot string) error {
 	dbDir := filepath.Join(config.DataDir, WLCommonsDB)
 
 	if _, err := os.Stat(filepath.Join(dbDir, ".dolt")); err == nil {
-		return nil
+		return ensureWLCommonsSchemaUpgrades(townRoot)
 	}
 
 	_, created, err := InitRig(townRoot, WLCommonsDB)
@@ -145,7 +222,58 @@ func EnsureWLCommons(townRoot string) error {
 		return fmt.Errorf("initializing wl-commons schema: %w", err)
 	}
 
+	return ensureWLCommonsSchemaUpgrades(townRoot)
+}
+
+func ensureWLCommonsSchemaUpgrades(townRoot string) error {
+	for _, upgrade := range []struct {
+		table      string
+		column     string
+		definition string
+	}{
+		{table: "completions", column: "evidence_type", definition: "VARCHAR(64)"},
+		{table: "completions", column: "validation_status", definition: "VARCHAR(32) DEFAULT 'unvalidated'"},
+		{table: "completions", column: "verified_by", definition: "VARCHAR(255)"},
+		{table: "completions", column: "verified_at", definition: "TIMESTAMP"},
+		{table: "completions", column: "status_snapshot", definition: "JSON"},
+		{table: "wanted", column: "work_spec", definition: "JSON"},
+	} {
+		if err := ensureWLCommonsColumn(townRoot, upgrade.table, upgrade.column, upgrade.definition); err != nil {
+			return err
+		}
+	}
+
+	script := fmt.Sprintf(`USE %s;
+INSERT INTO _meta (%s, value) VALUES ('schema_version', '1.2')
+  ON DUPLICATE KEY UPDATE value = '1.2';
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('--allow-empty', '-m', 'Upgrade wl-commons schema to v1.2');
+	`, WLCommonsDB, backtickKey())
+	return doltSQLScriptWithRetry(townRoot, script)
+}
+
+func ensureWLCommonsColumn(townRoot, table, column, definition string) error {
+	if wlCommonsColumnExists(townRoot, table, column) {
+		return nil
+	}
+	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition)
+	if err := doltSQLWithRetry(townRoot, WLCommonsDB, query); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
 	return nil
+}
+
+func wlCommonsColumnExists(townRoot, table, column string) bool {
+	query := fmt.Sprintf(
+		"SELECT column_name FROM information_schema.columns WHERE table_schema = '%s' AND table_name = '%s' AND column_name = '%s'",
+		EscapeSQL(WLCommonsDB), EscapeSQL(table), EscapeSQL(column),
+	)
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return false
+	}
+	rows := parseSimpleCSV(output)
+	return len(rows) > 0
 }
 
 func initWLCommonsSchema(townRoot string) error {
@@ -186,6 +314,7 @@ CREATE TABLE IF NOT EXISTS wanted (
     status VARCHAR(32) DEFAULT 'open',
     effort_level VARCHAR(16) DEFAULT 'medium',
     evidence_url TEXT,
+    work_spec JSON,
     sandbox_required TINYINT(1) DEFAULT 0,
     sandbox_scope JSON,
     sandbox_min_tier VARCHAR(32),
@@ -198,6 +327,11 @@ CREATE TABLE IF NOT EXISTS completions (
     wanted_id VARCHAR(64),
     completed_by VARCHAR(255),
     evidence TEXT,
+    evidence_type VARCHAR(64),
+    validation_status VARCHAR(32) DEFAULT 'unvalidated',
+    verified_by VARCHAR(255),
+    verified_at TIMESTAMP,
+    status_snapshot JSON,
     validated_by VARCHAR(255),
     stamp_id VARCHAR(64),
     parent_completion_id VARCHAR(64),
@@ -320,18 +454,19 @@ func InsertWanted(townRoot string, item *WantedItem) error {
 	if item.Status != "" {
 		status = fmt.Sprintf("'%s'", EscapeSQL(item.Status))
 	}
+	workSpecField := encodeJSONField(item.WorkSpec)
 
 	script := fmt.Sprintf(`USE %s;
 
-INSERT INTO wanted (id, title, description, project, type, priority, tags, posted_by, status, effort_level, created_at, updated_at)
-VALUES ('%s', '%s', %s, %s, %s, %d, %s, %s, %s, %s, '%s', '%s');
+INSERT INTO wanted (id, title, description, project, type, priority, tags, posted_by, status, effort_level, work_spec, created_at, updated_at)
+VALUES ('%s', '%s', %s, %s, %s, %d, %s, %s, %s, %s, %s, '%s', '%s');
 
 CALL DOLT_ADD('-A');
 CALL DOLT_COMMIT('-m', 'wl post: %s');
 `,
 		WLCommonsDB,
 		EscapeSQL(item.ID), EscapeSQL(item.Title), descField, projectField, typeField,
-		item.Priority, tagsJSON, postedByField, status, effortField,
+		item.Priority, tagsJSON, postedByField, status, effortField, workSpecField,
 		now, now,
 		EscapeSQL(item.Title))
 
@@ -374,11 +509,33 @@ CALL DOLT_COMMIT('-m', 'wl claim: %s');
 // completions.id is a PRIMARY KEY. NOT EXISTS prevents multiple completions per
 // wanted item, ensuring the lifecycle is strictly post→claim→done.
 func SubmitCompletion(townRoot, completionID, wantedID, rigHandle, evidence string) error {
+	assessment, err := wasteland.AnalyzeEvidence(evidence)
+	if err != nil {
+		return err
+	}
+	trustTier := wasteland.TierDrifter.String()
+	if level, levelErr := QueryRigTrustLevel(townRoot, rigHandle); levelErr == nil {
+		trustTier = wasteland.TrustTier(level).String()
+	}
+	snapshotField := encodeJSONField(&CompletionStatusSnapshot{
+		Version:          1,
+		RigHandle:        rigHandle,
+		ClaimStatus:      "in_review",
+		ValidationStatus: string(assessment.Status),
+		TrustTier:        trustTier,
+		SubmittedAt:      time.Now().UTC().Format(time.RFC3339),
+	})
+	verifiedBy := "NULL"
+	verifiedAt := "NULL"
+	if assessment.Status == wasteland.ValidationVerified {
+		verifiedBy = "'system:auto'"
+		verifiedAt = "NOW()"
+	}
 	script := fmt.Sprintf(`USE %s;
 UPDATE wanted SET status='in_review', evidence_url='%s', updated_at=NOW()
   WHERE id='%s' AND status='claimed' AND claimed_by='%s';
-INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, completed_at)
-  SELECT '%s', '%s', '%s', '%s', NOW()
+INSERT IGNORE INTO completions (id, wanted_id, completed_by, evidence, evidence_type, validation_status, verified_by, verified_at, status_snapshot, completed_at)
+  SELECT '%s', '%s', '%s', '%s', '%s', '%s', %s, %s, %s, NOW()
   FROM wanted WHERE id='%s' AND status='in_review' AND claimed_by='%s'
   AND NOT EXISTS (SELECT 1 FROM completions WHERE wanted_id='%s');
 CALL DOLT_ADD('-A');
@@ -387,10 +544,11 @@ CALL DOLT_COMMIT('-m', 'wl done: %s');
 		WLCommonsDB,
 		EscapeSQL(evidence), EscapeSQL(wantedID), EscapeSQL(rigHandle),
 		EscapeSQL(completionID), EscapeSQL(wantedID), EscapeSQL(rigHandle), EscapeSQL(evidence),
+		EscapeSQL(string(assessment.Type)), EscapeSQL(string(assessment.Status)), verifiedBy, verifiedAt, snapshotField,
 		EscapeSQL(wantedID), EscapeSQL(rigHandle), EscapeSQL(wantedID),
 		EscapeSQL(wantedID))
 
-	err := doltSQLScriptWithRetry(townRoot, script)
+	err = doltSQLScriptWithRetry(townRoot, script)
 	if err == nil {
 		return nil
 	}
@@ -398,6 +556,101 @@ CALL DOLT_COMMIT('-m', 'wl done: %s');
 		return fmt.Errorf("wanted item %q is not claimed by %q or does not exist", wantedID, rigHandle)
 	}
 	return fmt.Errorf("completion failed: %w", err)
+}
+
+// QueryRigTrustLevel fetches a rig's trust level.
+func QueryRigTrustLevel(townRoot, handle string) (int, error) {
+	query := fmt.Sprintf(`USE %s; SELECT trust_level FROM rigs WHERE handle='%s';`, WLCommonsDB, EscapeSQL(handle))
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return 0, err
+	}
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 {
+		return 0, fmt.Errorf("rig %q not found", handle)
+	}
+	level := 0
+	_, _ = fmt.Sscanf(rows[0]["trust_level"], "%d", &level)
+	return level, nil
+}
+
+// QueryCompletion fetches a completion by ID.
+func QueryCompletion(townRoot, completionID string) (*CompletionRecord, error) {
+	query := fmt.Sprintf(`USE %s; SELECT id, wanted_id, completed_by, evidence, COALESCE(evidence_type, '') AS evidence_type, COALESCE(validation_status, '') AS validation_status, COALESCE(verified_by, '') AS verified_by, COALESCE(CAST(verified_at AS CHAR), '') AS verified_at, COALESCE(CAST(completed_at AS CHAR), '') AS completed_at, COALESCE(status_snapshot, JSON_OBJECT()) AS status_snapshot FROM completions WHERE id='%s';`,
+		WLCommonsDB, EscapeSQL(completionID))
+	output, err := doltSQLQuery(townRoot, query)
+	if err != nil {
+		return nil, err
+	}
+	rows := parseSimpleCSV(output)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("completion %q not found", completionID)
+	}
+	row := rows[0]
+	return &CompletionRecord{
+		ID:               row["id"],
+		WantedID:         row["wanted_id"],
+		CompletedBy:      row["completed_by"],
+		Evidence:         row["evidence"],
+		EvidenceType:     row["evidence_type"],
+		ValidationStatus: row["validation_status"],
+		VerifiedBy:       row["verified_by"],
+		VerifiedAt:       row["verified_at"],
+		CompletedAt:      row["completed_at"],
+		StatusSnapshot:   decodeCompletionSnapshot(row["status_snapshot"]),
+	}, nil
+}
+
+// UpdateCompletionValidation persists a verification decision for a completion.
+func UpdateCompletionValidation(townRoot, completionID, verifier string, assessment wasteland.EvidenceAssessment) error {
+	completion, err := QueryCompletion(townRoot, completionID)
+	if err != nil {
+		return err
+	}
+	verifiedBy := "NULL"
+	verifiedAt := "NULL"
+	if strings.TrimSpace(verifier) != "" {
+		verifiedBy = fmt.Sprintf("'%s'", EscapeSQL(verifier))
+		verifiedAt = "NOW()"
+	}
+	trustTier := wasteland.TierDrifter.String()
+	if level, levelErr := QueryRigTrustLevel(townRoot, completion.CompletedBy); levelErr == nil {
+		trustTier = wasteland.TrustTier(level).String()
+	}
+	snapshot := &CompletionStatusSnapshot{
+		Version:          1,
+		RigHandle:        completion.CompletedBy,
+		ClaimStatus:      "in_review",
+		ValidationStatus: string(assessment.Status),
+		TrustTier:        trustTier,
+		SubmittedAt:      completion.CompletedAt,
+	}
+	if completion.StatusSnapshot != nil {
+		if completion.StatusSnapshot.RigHandle != "" {
+			snapshot.RigHandle = completion.StatusSnapshot.RigHandle
+		}
+		if completion.StatusSnapshot.ClaimStatus != "" {
+			snapshot.ClaimStatus = completion.StatusSnapshot.ClaimStatus
+		}
+		if completion.StatusSnapshot.SubmittedAt != "" {
+			snapshot.SubmittedAt = completion.StatusSnapshot.SubmittedAt
+		}
+		if completion.StatusSnapshot.TrustTier != "" && trustTier == wasteland.TierDrifter.String() {
+			snapshot.TrustTier = completion.StatusSnapshot.TrustTier
+		}
+	}
+	if snapshot.SubmittedAt == "" {
+		snapshot.SubmittedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	snapshotField := encodeJSONField(snapshot)
+	script := fmt.Sprintf(`USE %s;
+UPDATE completions
+  SET evidence_type='%s', validation_status='%s', verified_by=%s, verified_at=%s, status_snapshot=%s
+  WHERE id='%s';
+CALL DOLT_ADD('-A');
+CALL DOLT_COMMIT('-m', 'wl verify: %s');
+`, WLCommonsDB, EscapeSQL(string(assessment.Type)), EscapeSQL(string(assessment.Status)), verifiedBy, verifiedAt, snapshotField, EscapeSQL(completionID), EscapeSQL(completionID))
+	return doltSQLScriptWithRetry(townRoot, script)
 }
 
 // QueryWanted fetches a wanted item by ID. Returns nil if not found.
@@ -427,7 +680,7 @@ func QueryWanted(townRoot, wantedID string) (*WantedItem, error) {
 
 // QueryWantedFull fetches all fields of a wanted item by ID. Returns nil if not found.
 func QueryWantedFull(townRoot, wantedID string) (*WantedItem, error) {
-	query := fmt.Sprintf(`USE %s; SELECT id, title, COALESCE(description, '') as description, COALESCE(project, '') as project, COALESCE(type, '') as type, priority, COALESCE(tags, JSON_ARRAY()) as tags, COALESCE(posted_by, '') as posted_by, COALESCE(claimed_by, '') as claimed_by, status, COALESCE(effort_level, '') as effort_level, COALESCE(evidence_url, '') as evidence_url, COALESCE(sandbox_required, 0) as sandbox_required, COALESCE(CAST(created_at AS CHAR), '') as created_at, COALESCE(CAST(updated_at AS CHAR), '') as updated_at FROM wanted WHERE id='%s';`,
+	query := fmt.Sprintf(`USE %s; SELECT id, title, COALESCE(description, '') as description, COALESCE(project, '') as project, COALESCE(type, '') as type, priority, COALESCE(tags, JSON_ARRAY()) as tags, COALESCE(posted_by, '') as posted_by, COALESCE(claimed_by, '') as claimed_by, status, COALESCE(effort_level, '') as effort_level, COALESCE(evidence_url, '') as evidence_url, COALESCE(work_spec, JSON_OBJECT()) as work_spec, COALESCE(sandbox_required, 0) as sandbox_required, COALESCE(CAST(created_at AS CHAR), '') as created_at, COALESCE(CAST(updated_at AS CHAR), '') as updated_at FROM wanted WHERE id='%s';`,
 		WLCommonsDB, EscapeSQL(wantedID))
 
 	output, err := doltSQLQuery(townRoot, query)
@@ -452,6 +705,7 @@ func QueryWantedFull(townRoot, wantedID string) (*WantedItem, error) {
 		Status:      row["status"],
 		EffortLevel: row["effort_level"],
 		EvidenceURL: row["evidence_url"],
+		WorkSpec:    decodeWorkSpec(row["work_spec"]),
 		CreatedAt:   row["created_at"],
 		UpdatedAt:   row["updated_at"],
 	}

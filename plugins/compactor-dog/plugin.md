@@ -2,6 +2,9 @@
 name = "compactor-dog"
 description = "Monitor Dolt commit growth across production DBs and escalate when compaction is needed"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["dolt:read", "beads:read", "gt:escalate"]
 
 [gate]
 type = "cooldown"

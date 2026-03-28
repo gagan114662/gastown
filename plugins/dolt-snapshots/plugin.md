@@ -2,6 +2,9 @@
 name = "dolt-snapshots"
 description = "Tag Dolt databases at convoy boundaries for audit, diff, and rollback"
 version = 3
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["dolt:tag", "dolt:branch", "dolt:read"]
 
 [gate]
 type = "event"

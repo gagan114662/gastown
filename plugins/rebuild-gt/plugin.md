@@ -2,6 +2,9 @@
 name = "rebuild-gt"
 description = "Rebuild stale gt binary from gastown source"
 version = 2
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["git:read", "build:run", "filesystem:write"]
 
 [gate]
 type = "cooldown"

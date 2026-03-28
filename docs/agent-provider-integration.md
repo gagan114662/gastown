@@ -25,6 +25,20 @@ through tmux and environment variables. It does not import agent libraries,
 link against agent code, or require agents to import Gas Town code. Integration
 is configuration, not compilation.
 
+## Runtime Classes
+
+Gas Town treats every runtime as one of three classes:
+
+| Class | Contract | When to use it |
+|------|----------|----------------|
+| `acp` | [ACP v1](acp-v1.md) over JSON-RPC/stdin | Preferred. Native session-aware runtimes with structured progress/events |
+| `hooks` | CLI + settings/hooks integration | Good for CLIs that can load Gastown context/tool policy but do not speak ACP |
+| `shim` | tmux-only orchestration | Fallback for any terminal CLI |
+
+If you are building a new integration, target `acp` first. Hooks and shim
+support remain important compatibility layers, but ACP is the stable platform
+contract Gastown can verify with `gt acp verify`.
+
 ## Integration Tiers
 
 | Tier | Effort | What You Get | What You Provide |

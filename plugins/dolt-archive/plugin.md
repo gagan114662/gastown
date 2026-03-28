@@ -2,6 +2,9 @@
 name = "dolt-archive"
 description = "Offsite backup: JSONL snapshots to git, dolt push to GitHub/DoltHub"
 version = 1
+api_version = "v1"
+min_gastown_version = "0.0.0"
+permissions = ["filesystem:write", "git:push", "dolt:push"]
 
 [gate]
 type = "cooldown"

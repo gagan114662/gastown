@@ -32,10 +32,22 @@ var memoryTypeOrder = []string{"feedback", "user", "project", "reference", "gene
 
 var rememberKey string
 var rememberType string
+var rememberScope string
+var rememberSource string
+var rememberConfidence float64
+var rememberStatus string
+var rememberSupersedes []string
+var rememberValidatedAt string
 
 func init() {
 	rememberCmd.Flags().StringVar(&rememberKey, "key", "", "Explicit key slug (default: auto-generated from content)")
 	rememberCmd.Flags().StringVar(&rememberType, "type", "", "Memory type: feedback, project, user, reference (default: general)")
+	rememberCmd.Flags().StringVar(&rememberScope, "scope", "town", "Memory scope label (town, rig, repo, task)")
+	rememberCmd.Flags().StringVar(&rememberSource, "source", "manual", "Origin label for this memory")
+	rememberCmd.Flags().Float64Var(&rememberConfidence, "confidence", 1.0, "Confidence score from 0.0 to 1.0")
+	rememberCmd.Flags().StringVar(&rememberStatus, "status", "active", "Memory status: active, draft, archived, superseded")
+	rememberCmd.Flags().StringSliceVar(&rememberSupersedes, "supersedes", nil, "Other memory keys superseded by this record")
+	rememberCmd.Flags().StringVar(&rememberValidatedAt, "validated-at", "", "RFC3339 or YYYY-MM-DD timestamp for the last validation")
 	rememberCmd.GroupID = GroupWork
 	rootCmd.AddCommand(rememberCmd)
 }
@@ -82,6 +94,20 @@ func runRemember(cmd *cobra.Command, args []string) error {
 	if memType == "" {
 		memType = "general"
 	}
+	if rememberConfidence < 0 || rememberConfidence > 1 {
+		return fmt.Errorf("confidence must be between 0.0 and 1.0")
+	}
+	status := memoryStatus(strings.ToLower(strings.TrimSpace(rememberStatus)))
+	switch status {
+	case memoryStatusActive, memoryStatusArchived, memoryStatusSuperseded, memoryStatusDraft:
+	default:
+		return fmt.Errorf("invalid memory status %q", rememberStatus)
+	}
+	if rememberValidatedAt != "" {
+		if _, ok := parseMemoryTime(rememberValidatedAt); !ok {
+			return fmt.Errorf("validated-at must be RFC3339 or YYYY-MM-DD")
+		}
+	}
 
 	key := rememberKey
 	if key == "" {
@@ -100,12 +126,24 @@ func runRemember(cmd *cobra.Command, args []string) error {
 		verb = "Updated"
 	}
 
-	if err := bdKvSet(fullKey, content); err != nil {
+	record := newMemoryRecord(memType, content)
+	record.Scope = strings.TrimSpace(rememberScope)
+	record.Source = strings.TrimSpace(rememberSource)
+	record.Confidence = rememberConfidence
+	record.Status = status
+	record.Supersedes = append([]string(nil), rememberSupersedes...)
+	record.LastValidatedAt = strings.TrimSpace(rememberValidatedAt)
+	encoded, err := encodeMemoryRecord(record)
+	if err != nil {
+		return fmt.Errorf("encoding memory: %w", err)
+	}
+
+	if err := bdKvSet(fullKey, encoded); err != nil {
 		return fmt.Errorf("storing memory: %w", err)
 	}
 	if townRoot := detectTownRootFromCwd(); townRoot != "" {
 		if store, err := openContextStore(townRoot); err == nil {
-			_ = upsertMemoryContextDoc(store, memType, key, content)
+			_ = upsertMemoryContextDoc(store, memType, key, record)
 		}
 	}
 

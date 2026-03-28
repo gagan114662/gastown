@@ -5713,6 +5713,43 @@ func TestBuildStartupCommand_ExecWrapper(t *testing.T) {
 	}
 }
 
+func TestBuildStartupCommand_ExportsRolePolicy(t *testing.T) {
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+	if err := os.MkdirAll(rigPath, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := SaveTownConfig(filepath.Join(townRoot, "mayor", "town.json"), &TownConfig{
+		Type:      "town",
+		Version:   1,
+		Name:      "test-town",
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+	}); err != nil {
+		t.Fatalf("SaveTownConfig: %v", err)
+	}
+
+	townSettings := NewTownSettings()
+	townSettings.Policy = &PolicyConfig{
+		RolePolicies: map[string]*RolePolicyConfig{
+			"witness": {Commands: []string{"gt"}, GTSubcommands: []string{"prime", "hook"}},
+		},
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": "testrig/witness"}, rigPath, "")
+	if !strings.Contains(cmd, "GT_ROLE_POLICY=") {
+		t.Fatalf("expected GT_ROLE_POLICY export in command, got: %q", cmd)
+	}
+	if !strings.Contains(cmd, "\"gt_subcommands\":[\"prime\",\"hook\"]") {
+		t.Fatalf("expected GT_ROLE_POLICY to contain gt_subcommands, got: %q", cmd)
+	}
+}
+
 func TestBuildStartupCommandWithAgentOverride_ExecWrapper(t *testing.T) {
 	t.Parallel()
 	townRoot := t.TempDir()

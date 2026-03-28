@@ -155,6 +155,7 @@ func buildWLShowQuery(wantedID string) string {
 			" status,"+
 			" COALESCE(effort_level, '') as effort_level,"+
 			" COALESCE(evidence_url, '') as evidence_url,"+
+			" COALESCE(work_spec, JSON_OBJECT()) as work_spec,"+
 			" COALESCE(sandbox_required, 0) as sandbox_required,"+
 			" COALESCE(CAST(created_at AS CHAR), '') as created_at,"+
 			" COALESCE(CAST(updated_at AS CHAR), '') as updated_at"+
@@ -200,6 +201,7 @@ func queryWantedFromClone(doltPath, cloneDir, wantedID string) (*doltserver.Want
 		Status:      data["status"],
 		EffortLevel: data["effort_level"],
 		EvidenceURL: data["evidence_url"],
+		WorkSpec:    decodeWantedWorkSpecField(data["work_spec"]),
 		CreatedAt:   data["created_at"],
 		UpdatedAt:   data["updated_at"],
 	}
@@ -255,6 +257,7 @@ func renderWantedItem(item *doltserver.WantedItem) error {
 		{"Status", item.Status},
 		{"Effort", item.EffortLevel},
 		{"Evidence URL", item.EvidenceURL},
+		{"Work Spec", formatWantedWorkSpec(item.WorkSpec)},
 		{"Sandbox", sandboxVal},
 		{"Created", item.CreatedAt},
 		{"Updated", item.UpdatedAt},

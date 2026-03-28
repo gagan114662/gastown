@@ -45,6 +45,9 @@ func runWlClaim(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading wasteland config: %w", err)
 	}
+	if err := requireWastelandTier(townRoot, wlCfg, wasteland.TierRegistered, "claim work"); err != nil {
+		return err
+	}
 	rigHandle := wlCfg.RigHandle
 
 	var item *doltserver.WantedItem
