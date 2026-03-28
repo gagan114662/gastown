@@ -480,10 +480,30 @@ func NewDashboardMux(fetcher ConvoyFetcher, webCfg *config.WebTimeoutsConfig) (h
 	}
 	staticHandler := http.FileServer(http.FS(staticFS))
 
+	manageHandler := NewManageHandler(csrfToken, "gt")
+	manageFSys, _ := fs.Sub(staticFiles, "static/manage")
+	manageStaticHandler := http.FileServer(http.FS(manageFSys))
+
 	mux := http.NewServeMux()
+	mux.Handle("/api/manage/", manageHandler)
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/static/", http.StripPrefix("/static/", staticHandler))
+	mux.Handle("/manage/assets/", http.StripPrefix("/manage", manageStaticHandler))
+	mux.Handle("/manage/", http.HandlerFunc(serveManageSPA))
+	mux.Handle("/manage", http.HandlerFunc(serveManageSPA))
 	mux.Handle("/", convoyHandler)
 
 	return mux, nil
+}
+
+// serveManageSPA serves the React management SPA for /manage/* routes.
+// Returns a helpful error if the UI hasn't been built yet.
+func serveManageSPA(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFiles.ReadFile("static/manage/index.html")
+	if err != nil {
+		http.Error(w, "management UI not built — run: make ui", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
 }
